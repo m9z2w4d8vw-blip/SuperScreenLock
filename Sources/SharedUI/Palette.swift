@@ -1,12 +1,13 @@
 import UIKit
 
-/// Safe-door colors: deep green enamel, a brass dial, ivory lettering.
+/// Exit Guard's palette: one flat green field, white type, mint body text.
 enum Palette {
-    static let enamel = UIColor(hex: 0x10291F)
-    static let plate = UIColor(hex: 0x17392C)
-    static let brass = UIColor(hex: 0xD4A84B)
-    static let ivory = UIColor(hex: 0xEFE7D6)
-    static let steel = UIColor(hex: 0x8FA59B)
+    /// Background, and the ink on white buttons and checked boxes.
+    static let green = UIColor(hex: 0x17704B)
+    /// Body and helper text.
+    static let mint = UIColor(hex: 0xDEEBE6)
+    /// Hairline dividers.
+    static let rule = UIColor(hex: 0x5D9B81)
 }
 
 extension UIColor {

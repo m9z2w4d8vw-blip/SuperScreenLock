@@ -1,62 +1,143 @@
 import SwiftUI
 
-/// The safe dial. One tick per required scan; filled ticks are brass.
-struct DialView: View {
-    let total: Int
-    let filled: Int
-    var dimmed = false
+/// Icon, giant headline, body text. The top of every screen.
+struct Hero: View {
+    let symbol: String
+    let headline: String
+    let message: String
 
     var body: some View {
-        Canvas { context, size in
-            let side = min(size.width, size.height)
-            let center = CGPoint(x: size.width / 2, y: size.height / 2)
-            let radius = side / 2 - 1
-            let ring = CGRect(x: center.x - radius, y: center.y - radius, width: radius * 2, height: radius * 2)
-            context.stroke(Path(ellipseIn: ring), with: .color(Theme.brass.opacity(dimmed ? 0.3 : 0.6)), lineWidth: 1.5)
-
-            let count = max(total, 1)
-            let outer = radius - 12
-            let length = radius * (count > 30 ? 0.09 : 0.14)
-            let inner = outer - length
-            let spacing = 2 * CGFloat.pi * outer / CGFloat(count)
-            let width = max(2, min(8, spacing * 0.3))
-
-            for index in 0..<count {
-                let angle = Double(index) / Double(count) * 2 * Double.pi - Double.pi / 2
-                let dx = CGFloat(cos(angle))
-                let dy = CGFloat(sin(angle))
-                var tick = Path()
-                tick.move(to: CGPoint(x: center.x + dx * inner, y: center.y + dy * inner))
-                tick.addLine(to: CGPoint(x: center.x + dx * outer, y: center.y + dy * outer))
-                let color: Color = index < filled ? Theme.brass : Theme.steel.opacity(dimmed ? 0.2 : 0.38)
-                context.stroke(tick, with: .color(color), style: StrokeStyle(lineWidth: width, lineCap: .round))
-            }
+        VStack(alignment: .leading, spacing: 0) {
+            HeaderGlyph(symbol: symbol)
+            Text(headline)
+                .font(Theme.headline(58))
+                .foregroundStyle(Color.white)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.top, 18)
+                .accessibilityAddTraits(.isHeader)
+            Text(message)
+                .font(Theme.body)
+                .foregroundStyle(Theme.mint)
+                .lineSpacing(4)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.top, 14)
         }
-        .accessibilityHidden(true)
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 
-/// Minus, value, plus. Also adjustable with VoiceOver swipes.
-struct ValueStepper: View {
+struct HeaderGlyph: View {
+    let symbol: String
+
+    var body: some View {
+        Image(systemName: symbol)
+            .font(.system(size: 34, weight: .regular))
+            .foregroundStyle(Color.white)
+            .accessibilityHidden(true)
+    }
+}
+
+/// A one-pixel divider in the lighter green.
+struct Rule: View {
+    var body: some View {
+        Rectangle()
+            .fill(Theme.rule)
+            .frame(height: 1)
+            .accessibilityHidden(true)
+    }
+}
+
+/// White outline when off; white fill with a green check when on.
+struct Checkbox: View {
+    let isOn: Bool
+    var size: CGFloat = 22
+
+    var body: some View {
+        let shape = RoundedRectangle(cornerRadius: size * 0.18, style: .continuous)
+        shape
+            .fill(isOn ? Color.white : Color.clear)
+            .overlay(shape.strokeBorder(Color.white, lineWidth: isOn ? 0 : 1.6))
+            .overlay(
+                Image(systemName: "checkmark")
+                    .font(.system(size: size * 0.58, weight: .heavy))
+                    .foregroundStyle(Theme.green)
+                    .opacity(isOn ? 1 : 0)
+            )
+            .frame(width: size, height: size)
+            .animation(.easeOut(duration: 0.16), value: isOn)
+            .accessibilityHidden(true)
+    }
+}
+
+/// Checkbox, a semibold label, and helper text underneath. The whole row is tappable.
+struct CheckRow: View {
+    let title: String
+    var detail: String? = nil
+    let isOn: Bool
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack(alignment: .top, spacing: 14) {
+                Checkbox(isOn: isOn)
+                    .padding(.top, 1)
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(title)
+                        .font(Theme.label)
+                        .foregroundStyle(Color.white)
+                        .fixedSize(horizontal: false, vertical: true)
+                    if let detail {
+                        Text(detail)
+                            .font(Theme.small)
+                            .foregroundStyle(Theme.mint)
+                            .lineSpacing(3)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+                Spacer(minLength: 0)
+            }
+            .padding(.vertical, 18)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityAddTraits(isOn ? [.isSelected] : [])
+    }
+}
+
+/// Label, a big DIN number with minus and plus, helper text.
+struct ValueRow: View {
+    let title: String
+    let detail: String
     let value: String
-    let label: String
     let canDecrement: Bool
     let canIncrement: Bool
     let decrement: () -> Void
     let increment: () -> Void
 
     var body: some View {
-        HStack(spacing: 12) {
-            stepButton(symbol: "minus", enabled: canDecrement, action: decrement)
-            Text(value)
-                .font(.system(.title3).weight(.semibold).monospacedDigit())
-                .foregroundStyle(Theme.ivory)
-                .frame(minWidth: 70)
-            stepButton(symbol: "plus", enabled: canIncrement, action: increment)
+        VStack(alignment: .leading, spacing: 6) {
+            Text(title)
+                .font(Theme.label)
+                .foregroundStyle(Color.white)
+            HStack(alignment: .center, spacing: 10) {
+                Text(value)
+                    .font(Theme.headline(42))
+                    .monospacedDigit()
+                    .foregroundStyle(Color.white)
+                Spacer(minLength: 8)
+                SquareButton(symbol: "minus", enabled: canDecrement, action: decrement)
+                SquareButton(symbol: "plus", enabled: canIncrement, action: increment)
+            }
+            Text(detail)
+                .font(Theme.small)
+                .foregroundStyle(Theme.mint)
+                .fixedSize(horizontal: false, vertical: true)
         }
+        .padding(.vertical, 18)
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel(label)
+        .accessibilityLabel(title)
         .accessibilityValue(value)
+        .accessibilityHint(detail)
         .accessibilityAdjustableAction { direction in
             switch direction {
             case .increment:
@@ -68,47 +149,84 @@ struct ValueStepper: View {
             }
         }
     }
+}
 
-    private func stepButton(symbol: String, enabled: Bool, action: @escaping () -> Void) -> some View {
+struct SquareButton: View {
+    let symbol: String
+    let enabled: Bool
+    let action: () -> Void
+
+    var body: some View {
         Button(action: action) {
             Image(systemName: symbol)
-                .font(.system(size: 14, weight: .bold))
-                .foregroundStyle(enabled ? Theme.brass : Theme.steel.opacity(0.4))
-                .frame(width: 34, height: 34)
-                .overlay(Circle().stroke(enabled ? Theme.brass.opacity(0.7) : Theme.steel.opacity(0.25), lineWidth: 1.2))
-                .contentShape(Circle())
+                .font(.system(size: 15, weight: .bold))
+                .foregroundStyle(Color.white.opacity(enabled ? 1 : 0.35))
+                .frame(width: 44, height: 44)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 5, style: .continuous)
+                        .strokeBorder(Color.white.opacity(enabled ? 1 : 0.3), lineWidth: 1.6)
+                )
+                .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .disabled(!enabled)
     }
 }
 
-/// A row on the control plate: title and detail on the left, a control on the right.
-struct PlateRow<Trailing: View>: View {
+struct Choice<Value: Hashable>: Identifiable {
+    let value: Value
+    let label: String
+    var id: Value { value }
+}
+
+/// A row of outlined boxes; the chosen one is filled white.
+struct ChoiceRow<Value: Hashable>: View {
     let title: String
     var detail: String? = nil
-    @ViewBuilder let trailing: () -> Trailing
+    let options: [Choice<Value>]
+    @Binding var selection: Value
 
     var body: some View {
-        HStack(alignment: .center, spacing: 12) {
-            VStack(alignment: .leading, spacing: 3) {
-                Text(title)
-                    .font(.body.weight(.semibold))
-                    .foregroundStyle(Theme.ivory)
-                if let detail {
-                    Text(detail)
-                        .font(.footnote)
-                        .foregroundStyle(Theme.steel)
-                        .fixedSize(horizontal: false, vertical: true)
+        VStack(alignment: .leading, spacing: 12) {
+            Text(title)
+                .font(Theme.label)
+                .foregroundStyle(Color.white)
+            HStack(spacing: 8) {
+                ForEach(options) { option in
+                    let selected = option.value == selection
+                    Button {
+                        selection = option.value
+                    } label: {
+                        Text(option.label)
+                            .font(.system(size: 15, weight: .semibold))
+                            .foregroundStyle(selected ? Theme.green : Color.white)
+                            .frame(maxWidth: .infinity, minHeight: 44)
+                            .background(
+                                RoundedRectangle(cornerRadius: 5, style: .continuous)
+                                    .fill(selected ? Color.white : Color.clear)
+                            )
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 5, style: .continuous)
+                                    .strokeBorder(Color.white, lineWidth: selected ? 0 : 1.6)
+                            )
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityAddTraits(selected ? [.isSelected] : [])
                 }
             }
-            Spacer(minLength: 8)
-            trailing()
+            if let detail {
+                Text(detail)
+                    .font(Theme.small)
+                    .foregroundStyle(Theme.mint)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
         }
-        .padding(.vertical, 14)
+        .padding(.vertical, 18)
     }
 }
 
+/// White button with green text.
 struct PrimaryButton: View {
     let title: String
     let action: () -> Void
@@ -116,42 +234,54 @@ struct PrimaryButton: View {
     var body: some View {
         Button(action: action) {
             Text(title)
-                .font(.headline)
-                .foregroundStyle(Theme.enamel)
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 16)
-                .background(Theme.brass, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-                .contentShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                .font(Theme.label)
+                .foregroundStyle(Theme.green)
+                .frame(maxWidth: .infinity, minHeight: 54)
+                .background(
+                    RoundedRectangle(cornerRadius: 5, style: .continuous)
+                        .fill(Color.white)
+                )
+                .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
     }
 }
 
-struct QuietButton: View {
+/// White outline button.
+struct SecondaryButton: View {
     let title: String
     let action: () -> Void
 
     var body: some View {
         Button(action: action) {
             Text(title)
-                .font(.headline)
-                .foregroundStyle(Theme.ivory)
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 15)
+                .font(Theme.label)
+                .foregroundStyle(Color.white)
+                .frame(maxWidth: .infinity, minHeight: 54)
                 .overlay(
-                    RoundedRectangle(cornerRadius: 14, style: .continuous)
-                        .stroke(Theme.brass.opacity(0.55), lineWidth: 1)
+                    RoundedRectangle(cornerRadius: 5, style: .continuous)
+                        .strokeBorder(Color.white, lineWidth: 1.6)
                 )
-                .contentShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
     }
 }
 
-struct Hairline: View {
+/// Small underlined text button, like a link.
+struct TextLink: View {
+    let title: String
+    let action: () -> Void
+
     var body: some View {
-        Rectangle()
-            .fill(Theme.hairline)
-            .frame(height: 1)
+        Button(action: action) {
+            Text(title)
+                .font(Theme.small.weight(.semibold))
+                .underline()
+                .foregroundStyle(Color.white)
+                .padding(.vertical, 6)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
     }
 }

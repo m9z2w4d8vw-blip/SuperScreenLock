@@ -2,7 +2,7 @@ import FamilyControls
 import ManagedSettings
 import SwiftUI
 
-/// The scan screen. The dial fills one tick per scan.
+/// The scan screen: one checkbox per required scan, checked off as each one passes.
 struct UnlockView: View {
     @EnvironmentObject private var model: AppModel
     @StateObject private var session: ScanSession
@@ -16,55 +16,48 @@ struct UnlockView: View {
 
     var body: some View {
         ZStack {
-            Theme.enamel.ignoresSafeArea()
-            VStack(spacing: 0) {
-                HStack {
+            Theme.green.ignoresSafeArea()
+            ScrollView {
+                VStack(alignment: .leading, spacing: 0) {
                     Button(result == nil ? "Cancel" : "Done") {
                         close()
                     }
-                    .font(.body.weight(.semibold))
-                    .foregroundStyle(Theme.steel)
-                    Spacer()
+                    .font(Theme.label)
+                    .foregroundStyle(Color.white)
+                    .padding(.bottom, 28)
+
+                    HeaderGlyph(symbol: glyph)
+                    Text(headline)
+                        .font(Theme.headline(62))
+                        .foregroundStyle(Color.white)
+                        .contentTransition(.numericText())
+                        .animation(.easeOut(duration: 0.2), value: session.completed)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(.top, 18)
+                        .accessibilityAddTraits(.isHeader)
+                    targetDescription
+                        .padding(.top, 14)
+
+                    Rule()
+                        .padding(.top, 32)
+                    progressGrid
+                        .padding(.vertical, 24)
+                    Rule()
+
+                    Text(statusLine)
+                        .font(Theme.body)
+                        .foregroundStyle(Theme.mint)
+                        .lineSpacing(4)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(.top, 20)
+                    buttons
+                        .padding(.top, 28)
                 }
-                .padding(.horizontal, 22)
-                .padding(.top, 14)
-
-                Spacer(minLength: 16)
-                heading
-                Spacer(minLength: 28)
-
-                ZStack {
-                    DialView(total: session.required, filled: session.completed)
-                    VStack(spacing: 0) {
-                        Text("\(session.completed)")
-                            .font(Theme.display(68))
-                            .monospacedDigit()
-                            .foregroundStyle(Theme.ivory)
-                            .contentTransition(.numericText())
-                        Text("of \(session.required)")
-                            .font(.headline)
-                            .foregroundStyle(Theme.steel)
-                    }
-                }
-                .frame(width: 264, height: 264)
-                .animation(.easeOut(duration: 0.22), value: session.completed)
-                .accessibilityElement(children: .ignore)
-                .accessibilityLabel("\(session.completed) of \(session.required) scans done")
-
-                Spacer(minLength: 24)
-                Text(statusLine)
-                    .font(.body)
-                    .foregroundStyle(Theme.steel)
-                    .multilineTextAlignment(.center)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .padding(.horizontal, 32)
-                    .frame(minHeight: 68, alignment: .top)
-                Spacer(minLength: 16)
-
-                buttons
-                    .padding(.horizontal, 22)
-                    .padding(.bottom, 20)
+                .padding(.horizontal, 24)
+                .padding(.top, 16)
+                .padding(.bottom, 40)
             }
+            .scrollIndicators(.hidden)
         }
         .task {
             session.onFinish = { finish() }
@@ -76,50 +69,74 @@ struct UnlockView: View {
         }
     }
 
-    // MARK: Pieces
+    // MARK: Text
 
-    private var heading: some View {
-        VStack(spacing: 10) {
+    private var glyph: String {
+        if result != nil { return "checkmark.shield" }
+        return model.biometryName == "Touch ID" ? "touchid" : "faceid"
+    }
+
+    private var headline: String {
+        if result != nil {
             switch target {
-            case .app(let token):
-                Text("Unlocking")
-                    .font(.subheadline)
-                    .foregroundStyle(Theme.steel)
-                Label(token)
-                    .labelStyle(.titleAndIcon)
-                    .font(.title2.weight(.bold))
-                    .foregroundStyle(Theme.ivory)
-                Text("for \(Format.spokenDuration(minutes: model.saved.unlockMinutes))")
-                    .font(.subheadline)
-                    .foregroundStyle(Theme.steel)
-            case .allApps:
-                Text("Unlocking")
-                    .font(.subheadline)
-                    .foregroundStyle(Theme.steel)
-                Text("All apps")
-                    .font(Theme.display(26))
-                    .foregroundStyle(Theme.ivory)
-                Text("for \(Format.spokenDuration(minutes: model.saved.unlockMinutes))")
-                    .font(.subheadline)
-                    .foregroundStyle(Theme.steel)
-            case .saveSettings:
-                Text("Save your changes")
-                    .font(Theme.display(24))
-                    .foregroundStyle(Theme.ivory)
-                Text("Today's limit is used up, so changes take the same scans as unlocking.")
-                    .font(.subheadline)
-                    .foregroundStyle(Theme.steel)
-            case .turnOff:
-                Text("Turn off the lock")
-                    .font(Theme.display(24))
-                    .foregroundStyle(Theme.ivory)
-                Text("Today's limit is used up, so turning off takes the same scans as unlocking.")
-                    .font(.subheadline)
-                    .foregroundStyle(Theme.steel)
+            case .app: return "It's open."
+            case .allApps: return "Everything's open."
+            case .saveSettings: return "Changes saved."
+            case .turnOff: return "The lock is off."
             }
         }
-        .multilineTextAlignment(.center)
-        .padding(.horizontal, 28)
+        switch session.phase {
+        case .idle:
+            return "Get ready to scan."
+        case .scanning:
+            return "Scan \(min(session.completed + 1, session.required)) of \(session.required)."
+        case .paused:
+            return "Paused at \(session.completed) of \(session.required)."
+        case .finished:
+            return "All \(session.required) done."
+        }
+    }
+
+    private var window: String {
+        Format.spokenDuration(minutes: model.saved.unlockMinutes)
+    }
+
+    private var targetDescription: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            switch target {
+            case .app(let token):
+                Label(token)
+                    .labelStyle(.titleAndIcon)
+                    .font(.title3.weight(.semibold))
+                    .foregroundStyle(Color.white)
+                Text("Opens for \(window).")
+                    .font(Theme.body)
+                    .foregroundStyle(Theme.mint)
+            case .allApps:
+                Text("All apps")
+                    .font(.title3.weight(.semibold))
+                    .foregroundStyle(Color.white)
+                Text("Open for \(window).")
+                    .font(Theme.body)
+                    .foregroundStyle(Theme.mint)
+            case .saveSettings:
+                Text("Saving your changes")
+                    .font(.title3.weight(.semibold))
+                    .foregroundStyle(Color.white)
+                Text("Today's limit is used up, so saving takes the same scans as unlocking.")
+                    .font(Theme.body)
+                    .foregroundStyle(Theme.mint)
+                    .fixedSize(horizontal: false, vertical: true)
+            case .turnOff:
+                Text("Turning off the lock")
+                    .font(.title3.weight(.semibold))
+                    .foregroundStyle(Color.white)
+                Text("Today's limit is used up, so this takes the same scans as unlocking.")
+                    .font(Theme.body)
+                    .foregroundStyle(Theme.mint)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
     }
 
     private var statusLine: String {
@@ -132,17 +149,33 @@ struct UnlockView: View {
                 : "Hold your iPhone like you're unlocking it. Scanning starts in a moment."
         case .scanning:
             return session.usingPasscode
-                ? "Enter your passcode for scan \(next) of \(session.required)."
-                : "Scan \(next) of \(session.required)"
+                ? "Enter your passcode for scan \(next)."
+                : "Each box checks off when a scan passes."
         case .paused(let message):
             return message
         case .finished:
-            return "Unlocking"
+            return "Unlocking."
         }
     }
 
+    // MARK: Pieces
+
+    private var progressGrid: some View {
+        LazyVGrid(
+            columns: Array(repeating: GridItem(.fixed(24), spacing: 9), count: 10),
+            alignment: .leading,
+            spacing: 9
+        ) {
+            ForEach(0..<session.required, id: \.self) { index in
+                Checkbox(isOn: index < session.completed, size: 24)
+            }
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("\(session.completed) of \(session.required) scans done")
+    }
+
     private var buttons: some View {
-        VStack(spacing: 12) {
+        VStack(alignment: .leading, spacing: 14) {
             if result != nil {
                 PrimaryButton(title: "Done") {
                     close()
@@ -153,12 +186,9 @@ struct UnlockView: View {
                 }
             }
             if isAppTarget && result == nil && session.phase != .finished {
-                Button("Open all apps instead") {
+                TextLink(title: "Open all apps instead") {
                     target = .allApps
                 }
-                .font(.subheadline.weight(.semibold))
-                .foregroundStyle(Theme.steel)
-                .padding(.top, 4)
             }
         }
     }

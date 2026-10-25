@@ -7,72 +7,107 @@ struct DiagnosticsView: View {
     @State private var activities: [String] = []
 
     var body: some View {
-        NavigationStack {
-            List {
-                Section("Status") {
-                    LabeledContent("Screen Time access", value: model.authorizationText)
-                    LabeledContent("Notifications", value: model.notificationText)
-                    LabeledContent("Lock", value: model.saved.isEnabled ? "On" : "Off")
-                    LabeledContent("Today's limit reached", value: model.isLimitLocked ? "Yes" : "No")
-                    LabeledContent("Counting today from", value: model.countingFromText)
-                    LabeledContent("Scheduled", value: activities.isEmpty ? "Nothing" : activities.joined(separator: "\n"))
-                }
-                .listRowBackground(Theme.plate)
-
-                Section {
-                    if model.isTrialRunning {
-                        Button("End the test lock") {
-                            model.endTrial()
+        ZStack {
+            Theme.green.ignoresSafeArea()
+            ScrollView {
+                VStack(alignment: .leading, spacing: 0) {
+                    HStack {
+                        Button("Done") {
+                            dismiss()
+                        }
+                        .font(Theme.label)
+                        .foregroundStyle(Color.white)
+                        Spacer()
+                        Button("Clear log") {
+                            ActivityLog.clear()
                             reload()
                         }
-                    } else {
-                        Button("Test the lock for 15 minutes") {
+                        .font(Theme.label)
+                        .foregroundStyle(Theme.mint)
+                    }
+                    .padding(.bottom, 28)
+
+                    Hero(
+                        symbol: "waveform.path.ecg",
+                        headline: "What's happening.",
+                        message: "Status from the app and its three extensions. If something isn't locking, the log usually says why."
+                    )
+                    Rule()
+                        .padding(.top, 32)
+                    statusRow("Screen Time access", model.authorizationText)
+                    Rule()
+                    statusRow("Notifications", model.notificationText)
+                    Rule()
+                    statusRow("Lock", model.saved.isEnabled ? "On" : "Off")
+                    Rule()
+                    statusRow("Today's limit reached", model.isLimitLocked ? "Yes" : "No")
+                    Rule()
+                    statusRow("Counting today from", model.countingFromText)
+                    Rule()
+                    statusRow("Scheduled", activities.isEmpty ? "Nothing" : activities.joined(separator: "\n"))
+                    Rule()
+                    CheckRow(
+                        title: "Test lock",
+                        detail: "Locks every app right now so you can try the unlock flow without waiting for your limit. It ends by itself after 15 minutes.",
+                        isOn: model.isTrialRunning
+                    ) {
+                        if model.isTrialRunning {
+                            model.endTrial()
+                            reload()
+                        } else {
                             model.startTrial()
                             dismiss()
                         }
                     }
-                } footer: {
-                    Text("Locks every app right away so you can try the whole unlock flow without waiting for your limit. It ends by itself after 15 minutes.")
-                }
-                .listRowBackground(Theme.plate)
+                    Rule()
 
-                Section("Activity") {
+                    Text("Activity")
+                        .font(Theme.label)
+                        .foregroundStyle(Color.white)
+                        .padding(.top, 24)
+                        .padding(.bottom, 6)
                     if entries.isEmpty {
                         Text("Nothing logged yet.")
-                            .foregroundStyle(Theme.steel)
+                            .font(Theme.small)
+                            .foregroundStyle(Theme.mint)
                     }
                     ForEach(entries.reversed()) { entry in
                         VStack(alignment: .leading, spacing: 4) {
                             Text(entry.text)
-                                .foregroundStyle(Theme.ivory)
+                                .font(Theme.small)
+                                .foregroundStyle(Color.white)
+                                .fixedSize(horizontal: false, vertical: true)
                             Text("\(entry.source), \(entry.at.formatted(date: .abbreviated, time: .shortened))")
                                 .font(.caption)
-                                .foregroundStyle(Theme.steel)
+                                .foregroundStyle(Theme.mint)
                         }
-                        .padding(.vertical, 2)
+                        .padding(.vertical, 10)
                     }
                 }
-                .listRowBackground(Theme.plate)
+                .padding(.horizontal, 24)
+                .padding(.top, 20)
+                .padding(.bottom, 40)
             }
-            .scrollContentBackground(.hidden)
-            .background(Theme.enamel.ignoresSafeArea())
-            .navigationTitle("Diagnostics")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Done") { dismiss() }
-                }
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Clear log") {
-                        ActivityLog.clear()
-                        reload()
-                    }
-                }
-            }
-            .onAppear {
-                reload()
-            }
+            .scrollIndicators(.hidden)
         }
+        .onAppear {
+            reload()
+        }
+    }
+
+    private func statusRow(_ title: String, _ value: String) -> some View {
+        HStack(alignment: .top, spacing: 12) {
+            Text(title)
+                .font(Theme.label)
+                .foregroundStyle(Color.white)
+            Spacer(minLength: 12)
+            Text(value)
+                .font(Theme.body)
+                .foregroundStyle(Theme.mint)
+                .multilineTextAlignment(.trailing)
+        }
+        .padding(.vertical, 16)
+        .accessibilityElement(children: .combine)
     }
 
     private func reload() {

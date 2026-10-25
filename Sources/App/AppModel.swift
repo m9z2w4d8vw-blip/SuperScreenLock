@@ -33,7 +33,8 @@ final class AppModel: ObservableObject {
     @Published var allowedSelection: FamilyActivitySelection
     @Published private(set) var state: LockState
     @Published var unlockRequest: UnlockRequest?
-    @Published var alertMessage: String?
+    @Published var isAlertShown = false
+    @Published private(set) var alertMessage = ""
     @Published private(set) var hasSettled = false
 
     let biometry = Biometry.current()
@@ -117,6 +118,11 @@ final class AppModel: ObservableObject {
         }
     }
 
+    func showAlert(_ message: String) {
+        alertMessage = message
+        isAlertShown = true
+    }
+
     // MARK: Lifecycle
 
     /// Called on launch and every time the app comes to the front.
@@ -178,7 +184,7 @@ final class AppModel: ObservableObject {
             try await AuthorizationCenter.shared.requestAuthorization(for: .individual)
             ActivityLog.add("Screen Time access allowed")
         } catch {
-            alertMessage = "Screen Time access didn't go through: \(error.localizedDescription)"
+            showAlert("Screen Time access didn't go through: \(error.localizedDescription)")
             ActivityLog.add("Screen Time access failed: \(error)")
         }
         authorization = AuthorizationCenter.shared.authorizationStatus
@@ -256,7 +262,7 @@ final class AppModel: ObservableObject {
                 try Monitoring.startDaily(settings: next)
                 ActivityLog.add("Daily limit set to \(Format.duration(minutes: next.dailyLimitMinutes))")
             } catch {
-                alertMessage = "Couldn't start the daily limit: \(error.localizedDescription)"
+                showAlert("Couldn't start the daily limit: \(error.localizedDescription)")
                 ActivityLog.add("Starting the daily schedule failed: \(error)")
             }
         }

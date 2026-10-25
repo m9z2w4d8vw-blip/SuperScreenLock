@@ -56,14 +56,22 @@ enum ShieldDesign {
         }
 
         return ShieldConfiguration(
-            backgroundBlurStyle: .systemThickMaterialDark,
-            backgroundColor: Palette.enamel.withAlphaComponent(0.94),
-            icon: DialArt.image(ticks: min(max(settings.requiredScans, 1), 30)),
-            title: ShieldConfiguration.Label(text: title, color: Palette.ivory),
-            subtitle: ShieldConfiguration.Label(text: subtitle, color: Palette.steel),
-            primaryButtonLabel: ShieldConfiguration.Label(text: button, color: Palette.enamel),
-            primaryButtonBackgroundColor: Palette.brass,
-            secondaryButtonLabel: ShieldConfiguration.Label(text: "Close", color: Palette.ivory)
+            backgroundBlurStyle: nil,
+            backgroundColor: Palette.green,
+            icon: icon(),
+            title: ShieldConfiguration.Label(text: title, color: .white),
+            subtitle: ShieldConfiguration.Label(text: subtitle, color: Palette.mint),
+            primaryButtonLabel: ShieldConfiguration.Label(text: button, color: Palette.green),
+            primaryButtonBackgroundColor: .white,
+            secondaryButtonLabel: ShieldConfiguration.Label(text: "Close", color: .white)
         )
+    }
+
+    /// The same outlined shield as the app's header, kept small: oversized
+    /// images can make iOS fall back to its default shield.
+    private static func icon() -> UIImage? {
+        let config = UIImage.SymbolConfiguration(pointSize: 44, weight: .regular)
+        return UIImage(systemName: "lock.shield", withConfiguration: config)?
+            .withTintColor(.white, renderingMode: .alwaysOriginal)
     }
 }

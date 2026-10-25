@@ -6,17 +6,17 @@ struct RootView: View {
 
     var body: some View {
         ZStack {
-            Theme.enamel.ignoresSafeArea()
+            Theme.green.ignoresSafeArea()
             content
         }
         .fullScreenCover(item: $model.unlockRequest) { request in
             UnlockView(request: request, requiredScans: model.saved.requiredScans, method: model.biometryName)
                 .environmentObject(model)
         }
-        .alert("Super Screen Lock", isPresented: alertShown) {
+        .alert("Super Screen Lock", isPresented: $model.isAlertShown) {
             Button("OK", role: .cancel) {}
         } message: {
-            Text(model.alertMessage ?? "")
+            Text(model.alertMessage)
         }
         .onReceive(NotificationCenter.default.publisher(for: .sslOpenedFromNotification)) { _ in
             model.refresh()
@@ -33,14 +33,5 @@ struct RootView: View {
         } else if model.hasSettled || model.authorization != .notDetermined {
             SetupView()
         }
-    }
-
-    private var alertShown: Binding<Bool> {
-        Binding(
-            get: { model.alertMessage != nil },
-            set: { shown in
-                if !shown { model.alertMessage = nil }
-            }
-        )
     }
 }

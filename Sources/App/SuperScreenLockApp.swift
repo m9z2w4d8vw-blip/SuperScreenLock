@@ -7,7 +7,6 @@ struct SuperScreenLockApp: App {
     @Environment(\.scenePhase) private var scenePhase
 
     init() {
-        Theme.configureAppearance()
         UNUserNotificationCenter.current().delegate = NotificationDelegate.shared
     }
 
@@ -16,7 +15,7 @@ struct SuperScreenLockApp: App {
             RootView()
                 .environmentObject(model)
                 .preferredColorScheme(.dark)
-                .tint(Theme.brass)
+                .tint(Color.white)
         }
         .onChange(of: scenePhase) { phase in
             if phase == .active {

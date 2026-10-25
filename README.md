@@ -22,7 +22,7 @@ Free Apple ID sideloading (AltStore, Sideloadly) won't work. Those certificates 
 
 ## Trying it
 
-Open **Diagnostics** (the icon top right) and tap **Test the lock for 15 minutes**. That locks everything right away, so you can try the full unlock flow without using up your limit. The same screen shows a log from the app and all three extensions.
+Tap **Diagnostics and test lock** at the bottom of the home screen, then check **Test lock**. That locks everything right away, so you can try the full unlock flow without using up your limit. The same screen shows a log from the app and all three extensions.
 
 ## Things to know
 
