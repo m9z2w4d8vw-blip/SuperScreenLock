@@ -1,12 +1,10 @@
-name: Build unsigned IPA
+name: Build IPA
 
 on:
   push:
     branches: [main, master]
-  pull_request:
   workflow_dispatch:
 
-# Needed for the release step to create tags and upload the IPA.
 permissions:
   contents: write
 
@@ -14,93 +12,167 @@ concurrency:
   group: build-${{ github.ref }}
   cancel-in-progress: true
 
+env:
+  APP_NAME: SuperScreenLock
+  EXTENSIONS: LimitMonitor ShieldLook ShieldButtons
+  HOMEBREW_NO_AUTO_UPDATE: "1"
+  HOMEBREW_NO_INSTALL_CLEANUP: "1"
+
 jobs:
-  ipa:
-    runs-on: macos-15
+  build:
+    name: Build and publish IPA
+    runs-on: macos-26
+    timeout-minutes: 45
+
     steps:
       - name: Check out
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Check repo layout
         run: |
           missing=0
-          for p in project.yml Config/Info.plist Sources/App/NinjaViewApp.swift Resources/Assets.xcassets; do
-            if [ ! -e "$p" ]; then
-              echo "::error::$p is missing at the repo root. Copy the zip's contents (not the folder around them) into your clone."
+          for path in project.yml Sources/App Sources/Shared Sources/SharedUI Config Resources/Assets.xcassets; do
+            if [ ! -e "$path" ]; then
+              echo "::error::$path is missing from the top of the repo. Copy what's inside the zip into the repo root, not the folder around it."
               missing=1
             fi
           done
-          exit $missing
-
-      - name: Show Xcode version
-        run: xcodebuild -version
-
-      - name: Install XcodeGen
-        run: brew install xcodegen
-
-      - name: Generate Xcode project
-        run: xcodegen generate
-
-      - name: Build for device (unsigned)
-        run: |
-          set -o pipefail
-          xcodebuild \
-            -project NinjaView.xcodeproj \
-            -scheme NinjaView \
-            -configuration Release \
-            -sdk iphoneos \
-            -destination 'generic/platform=iOS' \
-            -derivedDataPath build \
-            CODE_SIGN_IDENTITY="" \
-            CODE_SIGNING_REQUIRED=NO \
-            CODE_SIGNING_ALLOWED=NO \
-            CURRENT_PROJECT_VERSION=${{ github.run_number }} \
-            build 2>&1 | tee xcodebuild.log
-
-      - name: Summarize compiler errors
-        if: failure()
-        run: |
-          if [ -f xcodebuild.log ]; then
-            echo "### Compiler errors" >> "$GITHUB_STEP_SUMMARY"
-            grep -E "error:" xcodebuild.log | sort -u | head -80 | sed 's/^/    /' | tee -a "$GITHUB_STEP_SUMMARY"
-          fi
-
-      - name: Package IPA
-        id: package
-        run: |
-          APP="build/Build/Products/Release-iphoneos/NinjaView.app"
-          if [ ! -d "$APP" ]; then
-            echo "::error::NinjaView.app wasn't found at $APP"
+          for ext in $EXTENSIONS; do
+            if [ ! -d "Sources/$ext" ]; then echo "::error::Sources/$ext is missing"; missing=1; fi
+            if [ ! -f "Config/$ext.entitlements" ]; then echo "::error::Config/$ext.entitlements is missing"; missing=1; fi
+          done
+          if [ ! -f "Config/$APP_NAME.entitlements" ]; then echo "::error::Config/$APP_NAME.entitlements is missing"; missing=1; fi
+          if [ "$missing" -ne 0 ]; then
+            echo "Top level of the repo:"
+            ls -la
             exit 1
           fi
-          rm -rf Payload && mkdir Payload
+
+      - name: Show toolchain
+        run: |
+          sw_vers
+          xcodebuild -version
+          xcrun --sdk iphoneos --show-sdk-version
+
+      - name: Install XcodeGen and ldid
+        run: brew install xcodegen ldid
+
+      - name: Generate Xcode project
+        run: |
+          xcodegen generate
+          xcodebuild -list -project "$APP_NAME.xcodeproj"
+
+      - name: Build for device
+        env:
+          BUILD_NUMBER: ${{ github.run_number }}
+        run: |
+          set -o pipefail
+          build() {
+            xcodebuild \
+              -project "$APP_NAME.xcodeproj" \
+              -scheme "$APP_NAME" \
+              -configuration Release \
+              -sdk iphoneos \
+              -destination 'generic/platform=iOS' \
+              -derivedDataPath build \
+              -quiet \
+              CODE_SIGN_IDENTITY="" \
+              CODE_SIGNING_REQUIRED=NO \
+              CODE_SIGNING_ALLOWED=NO \
+              CURRENT_PROJECT_VERSION="$BUILD_NUMBER" \
+              build 2>&1 | tee build.log
+          }
+          if ! build; then
+            if grep -qiE "is not installed|no simulator runtime|platform.*not.*installed" build.log; then
+              echo "::warning::The iOS platform is missing on this runner. Downloading it and retrying."
+              xcodebuild -downloadPlatform iOS
+              build
+            else
+              exit 1
+            fi
+          fi
+
+      - name: List compiler errors
+        if: failure()
+        run: |
+          if [ -f build.log ]; then
+            grep -E "error:" build.log | sort -u | head -40 | while IFS= read -r line; do
+              echo "::error::$line"
+            done
+          fi
+
+      - name: Sign with entitlements and package IPA
+        run: |
+          APP="build/Build/Products/Release-iphoneos/$APP_NAME.app"
+          if [ ! -d "$APP" ]; then
+            echo "::error::The build finished but $APP is missing"
+            find build/Build/Products -maxdepth 3 -print || true
+            exit 1
+          fi
+
+          # Screen Time only works if every binary carries Family Controls,
+          # so a missing entitlement fails the build instead of shipping a dud.
+          sign() {
+            ldid -S"$1" "$2"
+            ents="$(ldid -e "$2")"
+            case "$ents" in
+              *com.apple.developer.family-controls*) echo "Signed $2 with $1" ;;
+              *) echo "::error::$2 is missing the Family Controls entitlement after signing"; exit 1 ;;
+            esac
+          }
+
+          for EXT in $EXTENSIONS; do
+            APPEX="$APP/PlugIns/$EXT.appex"
+            if [ ! -f "$APPEX/$EXT" ]; then
+              echo "::error::$EXT.appex wasn't embedded in the app"
+              ls -la "$APP/PlugIns" || true
+              exit 1
+            fi
+            echo "$EXT extension point: $(plutil -extract NSExtension.NSExtensionPointIdentifier raw -o - "$APPEX/Info.plist")"
+            sign "Config/$EXT.entitlements" "$APPEX/$EXT"
+          done
+          sign "Config/$APP_NAME.entitlements" "$APP/$APP_NAME"
+
+          rm -rf Payload "$APP_NAME.ipa"
+          mkdir Payload
           cp -R "$APP" Payload/
-          IPA="NinjaView-b${{ github.run_number }}.ipa"
-          zip -qry "$IPA" Payload
-          VERSION=$(/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" Payload/NinjaView.app/Info.plist)
-          BUILD=$(/usr/libexec/PlistBuddy -c "Print :CFBundleVersion" Payload/NinjaView.app/Info.plist)
-          echo "Packaged $IPA, version $VERSION, build $BUILD"
-          echo "ipa=$IPA" >> "$GITHUB_OUTPUT"
-          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-          echo "size=$(du -h "$IPA" | cut -f1)" >> "$GITHUB_OUTPUT"
+          zip -qry "$APP_NAME.ipa" Payload
+          ls -lh "$APP_NAME.ipa"
+
+      - name: Publish to Releases
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BUILD_NUMBER: ${{ github.run_number }}
+          COMMIT_MESSAGE: ${{ github.event.head_commit.message }}
+        run: |
+          TAG="build-$BUILD_NUMBER"
+          SHORT_SHA="${GITHUB_SHA::7}"
+          {
+            echo "$APP_NAME build $BUILD_NUMBER from commit $SHORT_SHA, signed with ldid for TrollStore."
+            echo
+            if [ -n "$COMMIT_MESSAGE" ]; then
+              echo "$COMMIT_MESSAGE"
+              echo
+            fi
+            echo "Install by opening $APP_NAME.ipa with TrollStore."
+          } > release-notes.md
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" "$APP_NAME.ipa" --clobber
+          else
+            gh release create "$TAG" "$APP_NAME.ipa" \
+              --title "$APP_NAME build $BUILD_NUMBER" \
+              --notes-file release-notes.md \
+              --target "$GITHUB_SHA" \
+              --latest
+          fi
+          {
+            echo "### $APP_NAME build $BUILD_NUMBER"
+            echo "https://github.com/$GITHUB_REPOSITORY/releases/tag/$TAG"
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: NinjaView-ipa
-          path: ${{ steps.package.outputs.ipa }}
+          name: ${{ env.APP_NAME }}-build-${{ github.run_number }}
+          path: ${{ env.APP_NAME }}.ipa
           if-no-files-found: error
-
-      - name: Publish release
-        if: github.event_name == 'push'
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: build-${{ github.run_number }}
-          name: NinjaView ${{ steps.package.outputs.version }} (build ${{ github.run_number }})
-          files: ${{ steps.package.outputs.ipa }}
-          make_latest: true
-          body: |
-            Unsigned build for TrollStore. Requires iOS 17.0 or later. ${{ steps.package.outputs.size }}.
-
-            Download the .ipa on your iPhone, open it in TrollStore, and tap Install.
-            Commit ${{ github.sha }}.
