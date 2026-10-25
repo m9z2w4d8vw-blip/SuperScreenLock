@@ -19,7 +19,7 @@ struct RootView: View {
             Text(model.alertMessage)
         }
         .onReceive(NotificationCenter.default.publisher(for: .sslOpenedFromNotification)) { _ in
-            model.refresh()
+            model.refresh(reason: "Opened from a notification")
         }
         .task {
             await model.settle()

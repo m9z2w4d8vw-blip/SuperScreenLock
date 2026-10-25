@@ -27,6 +27,7 @@ enum ShieldStash {
             try? data.write(to: url)
         }
         AppGroup.defaults.set(data, forKey: key)
+        ActivityLog.add("Lock screen shown for \(application.localizedDisplayName ?? "an app")")
     }
 
     static func latest() -> Entry? {

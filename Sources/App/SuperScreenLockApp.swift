@@ -19,7 +19,7 @@ struct SuperScreenLockApp: App {
         }
         .onChange(of: scenePhase) { phase in
             if phase == .active {
-                model.refresh()
+                model.refresh(reason: "Came to the front")
             }
         }
     }

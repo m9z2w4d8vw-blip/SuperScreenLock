@@ -48,6 +48,7 @@ enum Monitoring {
             state.countsPastActivity = Monitoring.countsPastActivity
         }
         try center.startMonitoring(.daily, during: schedule, events: events)
+        ActivityLog.add("Daily schedule started: limit \(Format.duration(minutes: settings.dailyLimitMinutes)), counting from \(countsPastActivity ? "midnight" : "now")")
     }
 
     static func isDailyRunning() -> Bool {
@@ -108,14 +109,30 @@ enum Monitoring {
     // MARK: One-off timers (re-locks and the test lock)
 
     /// Wakes the monitor at `end` so it can lock things again.
+    ///
+    /// DeviceActivity rejects windows shorter than 15 minutes, but a window that
+    /// has already started fires right away. So a 5-minute unlock gets a 16-minute
+    /// window that began 11 minutes ago and ends exactly when the unlock does.
     @discardableResult
     static func scheduleTimer(endingAt end: Date) -> Bool {
         cleanUpFinishedTimers()
         let now = Date()
-        // DeviceActivity rejects intervals shorter than 15 minutes, so the window
-        // opens a minute in the past and never closes sooner than 15 minutes out.
-        let start = now.addingTimeInterval(-60)
-        let finish = max(end, start.addingTimeInterval(16 * 60))
+        let minimumWindow: TimeInterval = 16 * 60
+        var finish = max(end, now.addingTimeInterval(60))
+        var start = min(now.addingTimeInterval(-60), finish.addingTimeInterval(-minimumWindow))
+
+        // Hour/minute/second components can't say "yesterday", so a window can't
+        // start before midnight. Right after midnight that can make a re-lock late.
+        let midnight = Calendar.current.startOfDay(for: now)
+        if start < midnight {
+            start = midnight
+            if finish.timeIntervalSince(start) < minimumWindow {
+                finish = start.addingTimeInterval(minimumWindow)
+                ActivityLog.add("Re-lock pushed to \(Format.clock(finish)) because the window can't start before midnight")
+            }
+        }
+
+        // Only hour, minute and second, for both ends: mixing in dates stops the callbacks.
         let parts: Set<Calendar.Component> = [.hour, .minute, .second]
         let schedule = DeviceActivitySchedule(
             intervalStart: Calendar.current.dateComponents(parts, from: start),
@@ -125,11 +142,22 @@ enum Monitoring {
         let name = DeviceActivityName(timerPrefix + String(Int(finish.timeIntervalSince1970)))
         do {
             try DeviceActivityCenter().startMonitoring(name, during: schedule)
+            var detail = "Re-lock scheduled for \(clockWithSeconds(finish)), window \(clockWithSeconds(start)) to \(clockWithSeconds(finish))"
+            if let next = schedule.nextInterval {
+                detail += "; iOS reports \(clockWithSeconds(next.start)) to \(clockWithSeconds(next.end))"
+            }
+            ActivityLog.add(detail)
             return true
         } catch {
             ActivityLog.add("Couldn't schedule a re-lock: \(error.localizedDescription)")
             return false
         }
+    }
+
+    static func clockWithSeconds(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "HH:mm:ss"
+        return formatter.string(from: date)
     }
 
     static func cleanUpFinishedTimers() {

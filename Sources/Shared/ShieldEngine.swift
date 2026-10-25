@@ -31,11 +31,22 @@ enum ShieldEngine {
         let store = ManagedSettingsStore(named: .superScreenLock)
         guard shouldLock(settings: settings, state: state, now: now) else {
             store.clearAllSettings()
+            noteChange("clear", "Shield off: every app is open")
             return false
         }
+        let open = exceptions(settings: settings, state: state)
         store.shield.applications = nil
-        store.shield.applicationCategories = .all(except: exceptions(settings: settings, state: state))
+        store.shield.applicationCategories = .all(except: open)
+        noteChange("locked:\(open.count)", "Shield on: everything locked except \(open.count) app\(open.count == 1 ? "" : "s")")
         return true
+    }
+
+    /// apply() runs constantly, so only log when the result differs from last time.
+    private static func noteChange(_ signature: String, _ message: String) {
+        let key = "shield.lastApplied"
+        guard AppGroup.defaults.string(forKey: key) != signature else { return }
+        AppGroup.defaults.set(signature, forKey: key)
+        ActivityLog.add(message)
     }
 
     /// iOS takes at most 50 exceptions: always-allowed apps get the first 40,

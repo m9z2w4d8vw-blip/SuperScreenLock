@@ -6,6 +6,7 @@ struct HomeView: View {
     @EnvironmentObject private var model: AppModel
     @State private var pickingAllowedApps = false
     @State private var showingDiagnostics = false
+    @FocusState private var customFieldFocused: Bool
 
     var body: some View {
         ScrollView {
@@ -29,6 +30,15 @@ struct HomeView: View {
             }
         }
         .scrollIndicators(.hidden)
+        .scrollDismissesKeyboard(.interactively)
+        .toolbar {
+            ToolbarItemGroup(placement: .keyboard) {
+                Spacer()
+                Button("Done") {
+                    customFieldFocused = false
+                }
+            }
+        }
         .familyActivityPicker(isPresented: $pickingAllowedApps, selection: $model.allowedSelection)
         .sheet(isPresented: $showingDiagnostics) {
             DiagnosticsView()
@@ -156,11 +166,7 @@ struct HomeView: View {
                 increment: { model.stepScans(up: true) }
             )
             Rule()
-            ChoiceRow(
-                title: "Each unlock lasts",
-                options: LockSettings.unlockChoices.map { Choice(value: $0, label: Format.duration(minutes: $0)) },
-                selection: $model.draft.unlockMinutes
-            )
+            unlockLength
             Rule()
             ChoiceRow(
                 title: "Scanning opens",
@@ -174,6 +180,50 @@ struct HomeView: View {
             Rule()
             allowedRow
             Rule()
+        }
+    }
+
+    private var unlockOptions: [Choice<Int>] {
+        let presets = LockSettings.unlockChoices.map { Choice(value: $0, label: "\($0)m") }
+        return presets + [Choice(value: AppModel.customChoice, label: "Custom")]
+    }
+
+    private var unlockLength: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            ChoiceRow(
+                title: "Each unlock lasts",
+                detail: model.isCustomUnlock ? nil : "Then whatever you opened locks again.",
+                options: unlockOptions,
+                selection: $model.unlockChoice
+            )
+            if model.isCustomUnlock {
+                HStack(alignment: .firstTextBaseline, spacing: 10) {
+                    TextField("30", text: $model.customUnlockText)
+                        .keyboardType(.numberPad)
+                        .focused($customFieldFocused)
+                        .font(Theme.headline(42))
+                        .foregroundStyle(Color.white)
+                        .tint(Color.white)
+                        .frame(width: 96)
+                        .padding(.bottom, 2)
+                        .overlay(alignment: .bottom) {
+                            Rectangle()
+                                .fill(Color.white)
+                                .frame(height: 1.5)
+                        }
+                        .accessibilityLabel("Custom unlock length in minutes")
+                    Text("minutes")
+                        .font(Theme.label)
+                        .foregroundStyle(Theme.mint)
+                    Spacer(minLength: 0)
+                }
+                Text("Anywhere from \(LockSettings.customUnlockRange.lowerBound) to \(LockSettings.customUnlockRange.upperBound) minutes. Then whatever you opened locks again.")
+                    .font(Theme.small)
+                    .foregroundStyle(Theme.mint)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.top, 10)
+                    .padding(.bottom, 18)
+            }
         }
     }
 

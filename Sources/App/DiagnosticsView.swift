@@ -5,6 +5,7 @@ struct DiagnosticsView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var entries: [ActivityLog.Entry] = []
     @State private var activities: [String] = []
+    @State private var exportURL: URL?
 
     var body: some View {
         ZStack {
@@ -32,6 +33,8 @@ struct DiagnosticsView: View {
                         headline: "What's happening.",
                         message: "Status from the app and its three extensions. If something isn't locking, the log usually says why."
                     )
+                    shareButton
+                        .padding(.top, 28)
                     Rule()
                         .padding(.top, 32)
                     statusRow("Screen Time access", model.authorizationText)
@@ -39,6 +42,8 @@ struct DiagnosticsView: View {
                     statusRow("Notifications", model.notificationText)
                     Rule()
                     statusRow("Lock", model.saved.isEnabled ? "On" : "Off")
+                    Rule()
+                    statusRow("Each unlock lasts", Format.spokenDuration(minutes: model.saved.unlockMinutes))
                     Rule()
                     statusRow("Today's limit reached", model.isLimitLocked ? "Yes" : "No")
                     Rule()
@@ -110,8 +115,38 @@ struct DiagnosticsView: View {
         .accessibilityElement(children: .combine)
     }
 
+    /// The .txt is rebuilt every time this screen loads, so it's current when shared.
+    @ViewBuilder
+    private var shareButton: some View {
+        if let exportURL {
+            VStack(alignment: .leading, spacing: 10) {
+                ShareLink(item: exportURL, preview: SharePreview("Super Screen Lock debug log")) {
+                    HStack(spacing: 10) {
+                        Image(systemName: "square.and.arrow.up")
+                            .font(.system(size: 16, weight: .semibold))
+                        Text("Share debug log (.txt)")
+                            .font(Theme.label)
+                    }
+                    .foregroundStyle(Theme.green)
+                    .frame(maxWidth: .infinity, minHeight: 54)
+                    .background(
+                        RoundedRectangle(cornerRadius: 5, style: .continuous)
+                            .fill(Color.white)
+                    )
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                Text("A status snapshot plus everything logged by the app and all three extensions. Save it to Files or send it over.")
+                    .font(Theme.small)
+                    .foregroundStyle(Theme.mint)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
+
     private func reload() {
         entries = ActivityLog.all()
         activities = model.scheduledActivities
+        exportURL = DebugReport.write(model: model)
     }
 }

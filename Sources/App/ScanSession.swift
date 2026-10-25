@@ -20,26 +20,28 @@ enum Biometry: Equatable {
     var name: String { self == .touchID ? "Touch ID" : "Face ID" }
 }
 
-/// Runs the scans back to back. Every scan uses a fresh LAContext, so iOS
-/// can't reuse the previous match and each one is a real scan.
+/// One scan per tap. Nothing chains on its own: after each scan the screen
+/// waits for the button again. Every scan uses a fresh LAContext, so iOS
+/// can't reuse the previous match.
 @MainActor
 final class ScanSession: ObservableObject {
     enum Phase: Equatable {
-        case idle
+        /// Waiting for the person to tap Scan.
+        case ready
         case scanning
-        case paused(String)
+        /// The last scan didn't count. Tapping Scan retries it.
+        case failed(String)
         case finished
     }
 
     @Published private(set) var completed = 0
-    @Published private(set) var phase: Phase = .idle
+    @Published private(set) var phase: Phase = .ready
     @Published private(set) var usingPasscode = false
 
     let required: Int
     let method: String
     var onFinish: (() -> Void)?
 
-    private var task: Task<Void, Never>?
     private var context: LAContext?
 
     init(required: Int, method: String) {
@@ -47,66 +49,57 @@ final class ScanSession: ObservableObject {
         self.method = method
     }
 
-    var isPaused: Bool {
-        if case .paused = phase { return true }
-        return false
+    var nextScan: Int { min(completed + 1, required) }
+
+    var canScan: Bool {
+        phase != .scanning && phase != .finished
     }
 
-    func start() {
-        guard task == nil, phase != .finished else { return }
-        task = Task { [weak self] in
-            await self?.run()
+    func scanOnce() {
+        guard canScan else { return }
+        phase = .scanning
+        Task { [weak self] in
+            await self?.runOne()
         }
     }
 
     func stop() {
-        task?.cancel()
         context?.invalidate()
     }
 
-    private func run() async {
-        defer {
-            task = nil
-            context = nil
-        }
-        let tick = UIImpactFeedbackGenerator(style: .rigid)
-        tick.prepare()
-
-        while completed < required {
-            if Task.isCancelled {
-                phase = .paused("Scanning stopped.")
+    private func runOne() async {
+        let attempt = LAContext()
+        attempt.localizedFallbackTitle = ""
+        attempt.localizedCancelTitle = "Cancel"
+        context = attempt
+        defer { context = nil }
+        guard let policy = choosePolicy(for: attempt) else { return }
+        let number = nextScan
+        do {
+            let passed = try await attempt.evaluatePolicy(
+                policy,
+                localizedReason: "Scan \(number) of \(required) to unlock"
+            )
+            guard passed else {
+                phase = .failed("That scan didn't count. Tap Scan to try it again.")
+                ActivityLog.add("Scan \(number) of \(required) didn't count")
                 return
             }
-            phase = .scanning
-            let attempt = LAContext()
-            attempt.localizedFallbackTitle = ""
-            attempt.localizedCancelTitle = "Stop"
-            context = attempt
-            guard let policy = choosePolicy(for: attempt) else { return }
-            do {
-                let passed = try await attempt.evaluatePolicy(
-                    policy,
-                    localizedReason: "Scan \(completed + 1) of \(required) to unlock"
-                )
-                guard passed else {
-                    phase = .paused("That scan didn't count. Try it again.")
-                    return
-                }
-                completed += 1
-                tick.impactOccurred()
-                tick.prepare()
-            } catch {
-                phase = .paused(explain(error as NSError))
-                return
+            completed += 1
+            UIImpactFeedbackGenerator(style: .rigid).impactOccurred()
+            ActivityLog.add("Scan \(number) of \(required) passed\(usingPasscode ? " (passcode)" : "")")
+            if completed >= required {
+                phase = .finished
+                UINotificationFeedbackGenerator().notificationOccurred(.success)
+                onFinish?()
+            } else {
+                phase = .ready
             }
-            if completed < required {
-                try? await Task.sleep(nanoseconds: 450_000_000)
-            }
+        } catch {
+            let message = explain(error as NSError)
+            phase = .failed(message)
+            ActivityLog.add("Scan \(number) of \(required) didn't count: \(message)")
         }
-
-        phase = .finished
-        UINotificationFeedbackGenerator().notificationOccurred(.success)
-        onFinish?()
     }
 
     /// Face ID only (no passcode button), unless Face ID can't be used at all,
@@ -125,10 +118,10 @@ final class ScanSession: ObservableObject {
                 usingPasscode = true
                 return .deviceOwnerAuthentication
             }
-            phase = .paused(explain(passcodeError))
+            phase = .failed(explain(passcodeError))
             return nil
         }
-        phase = .paused(explain(error))
+        phase = .failed(explain(error))
         return nil
     }
 
@@ -137,9 +130,9 @@ final class ScanSession: ObservableObject {
         guard let code = LAError.Code(rawValue: error.code) else { return error.localizedDescription }
         switch code {
         case .userCancel, .appCancel, .systemCancel:
-            return "Scanning paused. Your progress stays while this screen is open."
+            return "Scan cancelled. Your progress stays while this screen is open."
         case .authenticationFailed:
-            return "\(method) didn't recognize you. Try that scan again."
+            return "\(method) didn't recognize you. Tap Scan to try again."
         case .biometryLockout:
             return "\(method) is locked after too many failed tries. Lock your iPhone, unlock it with your passcode, then come back."
         case .biometryNotEnrolled:

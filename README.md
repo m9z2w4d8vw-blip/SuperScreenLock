@@ -6,11 +6,13 @@ Set a daily screen time limit. When you hit it, every app locks until midnight, 
 
 All screen time counts toward the limit. You don't pick apps for that.
 
-When the limit is reached, every app is covered by Super Screen Lock's lock screen. Tapping **Unlock with Face ID** sends a notification. Tap it, and Super Screen Lock opens and runs the scans back to back. Each scan uses a fresh Face ID check, so iOS can't reuse an earlier match.
+When the limit is reached, every app is covered by Super Screen Lock's lock screen. Tapping **Unlock with Face ID** sends a notification. Tap it, and Super Screen Lock opens the scan screen. Every scan needs its own tap of the Scan button, and each one is a fresh Face ID check, so iOS can't reuse an earlier match.
 
 The lock screen can't run Face ID itself, because Apple doesn't allow it there. That's why the notification step exists.
 
-After the last scan, the app you came from stays open for the window you picked (15, 30, 45 or 60 minutes), then locks again. The lock resets at midnight.
+After the last scan, either that app or all apps open, depending on **Scanning opens**, for the length you picked: 5, 10, 15 or 20 minutes, or a custom number from 1 to 240. Then they lock again. The lock resets at midnight.
+
+iOS won't run a re-lock timer shorter than 15 minutes, so short unlocks use a 16-minute timer window that started in the past and ends exactly when the unlock does.
 
 While the limit is used up, saving settings or turning the lock off takes the same scans.
 
@@ -22,7 +24,9 @@ Free Apple ID sideloading (AltStore, Sideloadly) won't work. Those certificates 
 
 ## Trying it
 
-Tap **Diagnostics and test lock** at the bottom of the home screen, then check **Test lock**. That locks everything right away, so you can try the full unlock flow without using up your limit. The same screen shows a log from the app and all three extensions.
+Tap **Diagnostics and test lock** at the bottom of the home screen, then check **Test lock**. That locks everything right away, even if an unlock window is open, so you can try the full unlock flow without using up your limit.
+
+The same screen has **Share debug log (.txt)**. The file starts with a status snapshot and then has everything the app and all three extensions logged, oldest first. The log itself is kept in `debug-log.txt` in the App Group container and trimmed to about a megabyte.
 
 ## Things to know
 

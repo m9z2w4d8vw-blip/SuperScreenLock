@@ -2,16 +2,18 @@ import FamilyControls
 import ManagedSettings
 import SwiftUI
 
-/// The scan screen: one checkbox per required scan, checked off as each one passes.
+/// The scan screen: one checkbox per required scan, and one tap per scan.
 struct UnlockView: View {
     @EnvironmentObject private var model: AppModel
     @StateObject private var session: ScanSession
-    @State private var target: UnlockRequest.Target
     @State private var result: String?
+    private let target: UnlockRequest.Target
+    private let note: String?
 
     init(request: UnlockRequest, requiredScans: Int, method: String) {
         _session = StateObject(wrappedValue: ScanSession(required: requiredScans, method: method))
-        _target = State(initialValue: request.target)
+        target = request.target
+        note = request.note
     }
 
     var body: some View {
@@ -59,10 +61,8 @@ struct UnlockView: View {
             }
             .scrollIndicators(.hidden)
         }
-        .task {
+        .onAppear {
             session.onFinish = { finish() }
-            try? await Task.sleep(nanoseconds: 600_000_000)
-            session.start()
         }
         .onDisappear {
             session.stop()
@@ -86,12 +86,15 @@ struct UnlockView: View {
             }
         }
         switch session.phase {
-        case .idle:
-            return "Get ready to scan."
+        case .ready:
+            if session.completed == 0 {
+                return session.required == 1 ? "1 scan to go." : "\(session.required) scans to go."
+            }
+            return "\(session.completed) of \(session.required) done."
         case .scanning:
-            return "Scan \(min(session.completed + 1, session.required)) of \(session.required)."
-        case .paused:
-            return "Paused at \(session.completed) of \(session.required)."
+            return "Scanning \(session.nextScan) of \(session.required)."
+        case .failed:
+            return "Scan \(session.nextScan) didn't count."
         case .finished:
             return "All \(session.required) done."
         }
@@ -109,14 +112,14 @@ struct UnlockView: View {
                     .labelStyle(.titleAndIcon)
                     .font(.title3.weight(.semibold))
                     .foregroundStyle(Color.white)
-                Text("Opens for \(window).")
+                Text("Opens for \(window), then locks again.")
                     .font(Theme.body)
                     .foregroundStyle(Theme.mint)
             case .allApps:
                 Text("All apps")
                     .font(.title3.weight(.semibold))
                     .foregroundStyle(Color.white)
-                Text("Open for \(window).")
+                Text("Open for \(window), then everything locks again.")
                     .font(Theme.body)
                     .foregroundStyle(Theme.mint)
             case .saveSettings:
@@ -136,22 +139,31 @@ struct UnlockView: View {
                     .foregroundStyle(Theme.mint)
                     .fixedSize(horizontal: false, vertical: true)
             }
+            if let note {
+                Text(note)
+                    .font(Theme.small)
+                    .foregroundStyle(Theme.mint)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.top, 4)
+            }
         }
     }
 
     private var statusLine: String {
         if let result { return result }
-        let next = min(session.completed + 1, session.required)
         switch session.phase {
-        case .idle:
-            return model.biometryName == "Touch ID"
-                ? "Rest your finger on Touch ID. Scanning starts in a moment."
-                : "Hold your iPhone like you're unlocking it. Scanning starts in a moment."
+        case .ready:
+            if session.completed == 0 {
+                return "Each scan needs its own tap. Tap the button when you're ready."
+            }
+            let left = session.required - session.completed
+            return left == 1
+                ? "One more. Tap the button for the last scan."
+                : "\(left) to go. Tap the button for the next scan."
         case .scanning:
-            return session.usingPasscode
-                ? "Enter your passcode for scan \(next)."
-                : "Each box checks off when a scan passes."
-        case .paused(let message):
+            if session.usingPasscode { return "Enter your passcode." }
+            return model.biometryName == "Touch ID" ? "Rest your finger on Touch ID." : "Look at your iPhone."
+        case .failed(let message):
             return message
         case .finished:
             return "Unlocking."
@@ -180,22 +192,20 @@ struct UnlockView: View {
                 PrimaryButton(title: "Done") {
                     close()
                 }
-            } else if session.isPaused || session.phase == .idle {
-                PrimaryButton(title: session.completed == 0 ? "Start scanning" : "Resume scanning") {
-                    session.start()
-                }
-            }
-            if isAppTarget && result == nil && session.phase != .finished {
-                TextLink(title: "Open all apps instead") {
-                    target = .allApps
+            } else {
+                PrimaryButton(title: scanButtonTitle, enabled: session.canScan) {
+                    session.scanOnce()
                 }
             }
         }
     }
 
-    private var isAppTarget: Bool {
-        if case .app = target { return true }
-        return false
+    private var scanButtonTitle: String {
+        switch session.phase {
+        case .scanning: return "Scanning…"
+        case .failed: return "Try scan \(session.nextScan) again"
+        case .ready, .finished: return "Scan \(session.nextScan) of \(session.required)"
+        }
     }
 
     // MARK: Actions

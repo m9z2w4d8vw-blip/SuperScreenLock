@@ -229,6 +229,7 @@ struct ChoiceRow<Value: Hashable>: View {
 /// White button with green text.
 struct PrimaryButton: View {
     let title: String
+    var enabled = true
     let action: () -> Void
 
     var body: some View {
@@ -239,11 +240,12 @@ struct PrimaryButton: View {
                 .frame(maxWidth: .infinity, minHeight: 54)
                 .background(
                     RoundedRectangle(cornerRadius: 5, style: .continuous)
-                        .fill(Color.white)
+                        .fill(Color.white.opacity(enabled ? 1 : 0.55))
                 )
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .disabled(!enabled)
     }
 }
 

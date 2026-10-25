@@ -15,6 +15,8 @@ struct UnlockRequest: Identifiable, Equatable {
 
     let id = UUID()
     var target: Target
+    /// Shown on the scan screen, e.g. why "That app" became all apps.
+    var note: String? = nil
 }
 
 enum NotificationAccess: Equatable {
@@ -36,6 +38,13 @@ final class AppModel: ObservableObject {
     @Published var isAlertShown = false
     @Published private(set) var alertMessage = ""
     @Published private(set) var hasSettled = false
+    /// What's typed in the custom minutes field.
+    @Published var customUnlockText = "" {
+        didSet { applyCustomUnlockText() }
+    }
+
+    /// The "Custom" box's value in the unlock-length picker.
+    static let customChoice = -1
 
     let biometry = Biometry.current()
 
@@ -46,11 +55,48 @@ final class AppModel: ObservableObject {
         state = SharedStore.state
         allowedSelection = SelectionStore.load()
         authorization = AuthorizationCenter.shared.authorizationStatus
+        customUnlockText = Self.customText(for: settings)
     }
 
     // MARK: Derived state
 
     var biometryName: String { biometry.name }
+
+    var isCustomUnlock: Bool {
+        draft.unlockIsCustom || !LockSettings.unlockChoices.contains(draft.unlockMinutes)
+    }
+
+    /// Bound to the unlock-length boxes: a preset's minutes, or `customChoice`.
+    var unlockChoice: Int {
+        get { isCustomUnlock ? Self.customChoice : draft.unlockMinutes }
+        set {
+            if newValue == Self.customChoice {
+                draft.unlockIsCustom = true
+                draft.unlockMinutes = Self.clampCustom(Int(customUnlockText.filter(\.isNumber).prefix(4)) ?? 30)
+                customUnlockText = "\(draft.unlockMinutes)"
+            } else {
+                draft.unlockIsCustom = false
+                draft.unlockMinutes = newValue
+            }
+        }
+    }
+
+    private func applyCustomUnlockText() {
+        guard isCustomUnlock, let typed = Int(customUnlockText.filter(\.isNumber).prefix(4)) else { return }
+        let minutes = Self.clampCustom(typed)
+        if draft.unlockMinutes != minutes {
+            draft.unlockMinutes = minutes
+        }
+    }
+
+    private static func clampCustom(_ minutes: Int) -> Int {
+        min(max(minutes, LockSettings.customUnlockRange.lowerBound), LockSettings.customUnlockRange.upperBound)
+    }
+
+    private static func customText(for settings: LockSettings) -> String {
+        let custom = settings.unlockIsCustom || !LockSettings.unlockChoices.contains(settings.unlockMinutes)
+        return custom ? "\(settings.unlockMinutes)" : "30"
+    }
 
     /// Locked because today's limit is used up (not just a test lock).
     var isLimitLocked: Bool {
@@ -126,7 +172,7 @@ final class AppModel: ObservableObject {
     // MARK: Lifecycle
 
     /// Called on launch and every time the app comes to the front.
-    func refresh() {
+    func refresh(reason: String? = nil) {
         authorization = AuthorizationCenter.shared.authorizationStatus
         var settings = SharedStore.settings
         if settings.biometryName != biometry.name {
@@ -152,12 +198,16 @@ final class AppModel: ObservableObject {
         }
         state = SharedStore.state
         Task { await refreshNotificationAccess() }
+        if let reason {
+            ActivityLog.add("\(reason): Screen Time \(authorizationText.lowercased()), lock \(saved.isEnabled ? "on" : "off"), apps \(isShielding ? "locked" : "open")")
+            ActivityLog.trimTextFile()
+        }
         presentPendingUnlockIfNeeded()
     }
 
     /// FamilyControls can report its status a beat late on launch.
     func settle() async {
-        refresh()
+        refresh(reason: "Launched")
         try? await Task.sleep(nanoseconds: 700_000_000)
         refresh()
         hasSettled = true
@@ -291,6 +341,7 @@ final class AppModel: ObservableObject {
         draft = saved
         allowedSelection = SelectionStore.load()
         state = SharedStore.state
+        customUnlockText = Self.customText(for: saved)
     }
 
     // MARK: Unlocking
@@ -300,18 +351,33 @@ final class AppModel: ObservableObject {
         guard unlockRequest == nil,
               let request = state.freshPending(at: Date()),
               isShielding else { return }
-        unlockRequest = UnlockRequest(target: resolveTarget(for: request))
+        unlockRequest = resolve(request)
     }
 
-    private func resolveTarget(for request: PendingUnlock) -> UnlockRequest.Target {
-        if saved.unlockScope == .allApps { return .allApps }
-        if request.source == .app, let token = request.appToken { return .app(token) }
+    /// Follows the "Scanning opens" setting. "That app" only falls back to all
+    /// apps when iOS never said which app was on the lock screen.
+    private func resolve(_ request: PendingUnlock) -> UnlockRequest {
+        if saved.unlockScope == .allApps {
+            ActivityLog.add("Unlock request: all apps (setting)")
+            return UnlockRequest(target: .allApps)
+        }
+        if request.source == .app, let token = request.appToken {
+            ActivityLog.add("Unlock request: that app (named by the lock screen buttons)")
+            return UnlockRequest(target: .app(token))
+        }
         // Tapping Unlock redraws the shield, and that redraw records the app on
         // screen. Only trust a record from that redraw or later.
-        if let entry = ShieldStash.latest(), entry.at >= request.createdAt.addingTimeInterval(-2) {
-            return .app(entry.token)
+        let record = ShieldStash.latest()
+        if let record, record.at >= request.createdAt.addingTimeInterval(-2) {
+            ActivityLog.add("Unlock request: that app (\(record.name ?? "unnamed"), recorded \(ActivityLog.timestamp(record.at)))")
+            return UnlockRequest(target: .app(record.token))
         }
-        return .allApps
+        let seen = record.map { "last record \(ActivityLog.timestamp($0.at)), before the tap" } ?? "no record at all"
+        ActivityLog.add("Unlock request: all apps, because the lock screen didn't say which app (\(seen))")
+        return UnlockRequest(
+            target: .allApps,
+            note: "iOS didn't say which app you came from, so these scans open all apps."
+        )
     }
 
     func requestUnlockAll() {
@@ -375,7 +441,14 @@ final class AppModel: ObservableObject {
 
     func startTrial() {
         let until = Date().addingTimeInterval(15 * 60)
-        SharedStore.updateState { $0.trialUntil = until }
+        // Ends any open window first, otherwise "Everything's open" would
+        // override the test and nothing would lock.
+        SharedStore.updateState { state in
+            state.trialUntil = until
+            state.allAppsUntil = nil
+            state.appGrants = []
+            state.pending = nil
+        }
         ShieldEngine.apply()
         Monitoring.scheduleTimer(endingAt: until)
         state = SharedStore.state

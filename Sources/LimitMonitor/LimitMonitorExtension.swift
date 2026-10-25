@@ -18,7 +18,7 @@ final class LimitMonitorExtension: DeviceActivityMonitor {
     override func intervalDidEnd(for activity: DeviceActivityName) {
         super.intervalDidEnd(for: activity)
         guard Monitoring.isTimer(activity) else { return }
-        let locked = ShieldEngine.apply(now: Date(), grace: 90)
+        let locked = ShieldEngine.apply(now: Date(), grace: 30)
         DeviceActivityCenter().stopMonitoring([activity])
         ActivityLog.add(locked ? "Unlock window ended; apps locked again" : "Unlock window ended")
     }

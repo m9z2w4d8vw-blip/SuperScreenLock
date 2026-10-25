@@ -15,18 +15,21 @@ struct LockSettings: Codable, Equatable {
     var dailyLimitMinutes = 120
     var requiredScans = 10
     var unlockMinutes = 15
+    /// True when the person typed their own length instead of picking a preset.
+    var unlockIsCustom = false
     var unlockScope: UnlockScope = .thatApp
     var allowedApps: Set<ApplicationToken> = []
     var biometryName = "Face ID"
 
     static let scanRange = 1...50
     static let limitRange = 5...720
-    static let unlockChoices = [15, 30, 45, 60]
+    static let unlockChoices = [5, 10, 15, 20]
+    static let customUnlockRange = 1...240
 
     init() {}
 
     private enum CodingKeys: String, CodingKey {
-        case isEnabled, dailyLimitMinutes, requiredScans, unlockMinutes, unlockScope, allowedApps, biometryName
+        case isEnabled, dailyLimitMinutes, requiredScans, unlockMinutes, unlockIsCustom, unlockScope, allowedApps, biometryName
     }
 
     // Lenient on purpose: a missing key falls back to its default instead of
@@ -37,6 +40,8 @@ struct LockSettings: Codable, Equatable {
         dailyLimitMinutes = (try? c.decode(Int.self, forKey: .dailyLimitMinutes)) ?? 120
         requiredScans = (try? c.decode(Int.self, forKey: .requiredScans)) ?? 10
         unlockMinutes = (try? c.decode(Int.self, forKey: .unlockMinutes)) ?? 15
+        // Lengths saved by earlier builds (30, 45, 60) aren't presets anymore, so they become custom.
+        unlockIsCustom = (try? c.decode(Bool.self, forKey: .unlockIsCustom)) ?? !LockSettings.unlockChoices.contains(unlockMinutes)
         unlockScope = (try? c.decode(UnlockScope.self, forKey: .unlockScope)) ?? .thatApp
         allowedApps = (try? c.decode(Set<ApplicationToken>.self, forKey: .allowedApps)) ?? []
         biometryName = (try? c.decode(String.self, forKey: .biometryName)) ?? "Face ID"
