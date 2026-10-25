@@ -1,0 +1,97 @@
+name: SuperScreenLock
+
+options:
+  bundleIdPrefix: com.parv
+  deploymentTarget:
+    iOS: "16.0"
+  createIntermediateGroups: true
+  developmentLanguage: en
+
+settings:
+  base:
+    SWIFT_VERSION: "5.0"
+    SWIFT_STRICT_CONCURRENCY: minimal
+    MARKETING_VERSION: "1.0"
+    CURRENT_PROJECT_VERSION: "1"
+    IPHONEOS_DEPLOYMENT_TARGET: "16.0"
+    TARGETED_DEVICE_FAMILY: "1"
+    GENERATE_INFOPLIST_FILE: NO
+    CODE_SIGN_STYLE: Manual
+    CODE_SIGN_IDENTITY: ""
+    DEVELOPMENT_TEAM: ""
+    # Entitlements live in Config/*.entitlements. The CI build is unsigned and
+    # ldid applies them afterwards, so they are deliberately not wired into
+    # CODE_SIGN_ENTITLEMENTS here.
+
+targets:
+  SuperScreenLock:
+    type: application
+    platform: iOS
+    sources:
+      - path: Sources/App
+      - path: Sources/Shared
+      - path: Sources/SharedUI
+      - path: Resources/Assets.xcassets
+    settings:
+      base:
+        PRODUCT_NAME: SuperScreenLock
+        PRODUCT_BUNDLE_IDENTIFIER: com.parv.superscreenlock
+        INFOPLIST_FILE: Config/App-Info.plist
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+    dependencies:
+      - target: LimitMonitor
+      - target: ShieldLook
+      - target: ShieldButtons
+
+  # Wakes up at the daily limit, at midnight, and when an unlock window ends.
+  LimitMonitor:
+    type: app-extension
+    platform: iOS
+    sources:
+      - path: Sources/LimitMonitor
+      - path: Sources/Shared
+    settings:
+      base:
+        PRODUCT_NAME: LimitMonitor
+        PRODUCT_BUNDLE_IDENTIFIER: com.parv.superscreenlock.LimitMonitor
+        INFOPLIST_FILE: Config/LimitMonitor-Info.plist
+        APPLICATION_EXTENSION_API_ONLY: YES
+
+  # Draws the lock screen that covers a locked app.
+  ShieldLook:
+    type: app-extension
+    platform: iOS
+    sources:
+      - path: Sources/ShieldLook
+      - path: Sources/Shared
+      - path: Sources/SharedUI
+    settings:
+      base:
+        PRODUCT_NAME: ShieldLook
+        PRODUCT_BUNDLE_IDENTIFIER: com.parv.superscreenlock.ShieldLook
+        INFOPLIST_FILE: Config/ShieldLook-Info.plist
+        APPLICATION_EXTENSION_API_ONLY: YES
+
+  # Handles the buttons on that lock screen.
+  ShieldButtons:
+    type: app-extension
+    platform: iOS
+    sources:
+      - path: Sources/ShieldButtons
+      - path: Sources/Shared
+    settings:
+      base:
+        PRODUCT_NAME: ShieldButtons
+        PRODUCT_BUNDLE_IDENTIFIER: com.parv.superscreenlock.ShieldButtons
+        INFOPLIST_FILE: Config/ShieldButtons-Info.plist
+        APPLICATION_EXTENSION_API_ONLY: YES
+
+schemes:
+  SuperScreenLock:
+    build:
+      targets:
+        SuperScreenLock: all
+    run:
+      config: Debug
+    archive:
+      config: Release
