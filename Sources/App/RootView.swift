@@ -10,7 +10,12 @@ struct RootView: View {
             content
         }
         .fullScreenCover(item: $model.unlockRequest) { request in
-            UnlockView(request: request, requiredScans: model.saved.requiredScans, method: model.biometryName)
+            UnlockView(
+                request: request,
+                requiredScans: model.saved.requiredScans,
+                method: model.biometryName,
+                restartOnFail: model.saved.restartOnFail
+            )
                 .environmentObject(model)
         }
         .alert("Super Screen Lock", isPresented: $model.isAlertShown) {

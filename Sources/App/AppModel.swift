@@ -7,15 +7,17 @@ import UserNotifications
 /// What a round of scans is for.
 struct UnlockRequest: Identifiable, Equatable {
     enum Target: Equatable {
-        case app(ApplicationToken)
+        /// These apps. An empty list means the scan screen asks which app first.
+        case apps([ApplicationToken])
         case allApps
         case saveSettings
         case turnOff
+        case allowAppDeletion
     }
 
     let id = UUID()
     var target: Target
-    /// Shown on the scan screen, e.g. why "That app" became all apps.
+    /// Shown on the scan screen.
     var note: String? = nil
 }
 
@@ -33,6 +35,7 @@ final class AppModel: ObservableObject {
     @Published private(set) var saved: LockSettings
     @Published var draft: LockSettings
     @Published var allowedSelection: FamilyActivitySelection
+    @Published var extraLockSelection: FamilyActivitySelection
     @Published private(set) var state: LockState
     @Published var unlockRequest: UnlockRequest?
     @Published var isAlertShown = false
@@ -53,7 +56,8 @@ final class AppModel: ObservableObject {
         saved = settings
         draft = settings
         state = SharedStore.state
-        allowedSelection = SelectionStore.load()
+        allowedSelection = SelectionStore.load(.allowed)
+        extraLockSelection = SelectionStore.load(.extraLock)
         authorization = AuthorizationCenter.shared.authorizationStatus
         customUnlockText = Self.customText(for: settings)
     }
@@ -123,8 +127,10 @@ final class AppModel: ObservableObject {
     var hasUnsavedChanges: Bool {
         var candidate = draft
         candidate.allowedApps = allowedSelection.applicationTokens
+        candidate.extraLockedApps = extraLockSelection.applicationTokens
         candidate.isEnabled = saved.isEnabled
         candidate.biometryName = saved.biometryName
+        candidate.blockAppDeletion = saved.blockAppDeletion
         return candidate != saved
     }
 
@@ -190,6 +196,7 @@ final class AppModel: ObservableObject {
             }
             Monitoring.cleanUpFinishedTimers()
             ShieldEngine.apply()
+            ShieldEngine.applyDeletionGuard(settings.blockAppDeletion)
         }
         let previous = saved
         saved = SharedStore.settings
@@ -294,12 +301,16 @@ final class AppModel: ObservableObject {
     private func persist(enabled: Bool, restartMonitoring: Bool) {
         var next = draft
         next.allowedApps = allowedSelection.applicationTokens
+        next.extraLockedApps = extraLockSelection.applicationTokens
         next.isEnabled = enabled
         next.biometryName = biometry.name
+        // Only its own toggle changes this, never Save.
+        next.blockAppDeletion = saved.blockAppDeletion
         let limitChanged = next.dailyLimitMinutes != saved.dailyLimitMinutes
 
         SharedStore.settings = next
-        SelectionStore.save(allowedSelection)
+        SelectionStore.save(allowedSelection, as: .allowed)
+        SelectionStore.save(extraLockSelection, as: .extraLock)
         if limitChanged {
             // Let the new limit decide instead of carrying over today's lock.
             SharedStore.updateState { state in
@@ -339,9 +350,40 @@ final class AppModel: ObservableObject {
     private func reloadFromStore() {
         saved = SharedStore.settings
         draft = saved
-        allowedSelection = SelectionStore.load()
+        allowedSelection = SelectionStore.load(.allowed)
+        extraLockSelection = SelectionStore.load(.extraLock)
         state = SharedStore.state
         customUnlockText = Self.customText(for: saved)
+    }
+
+    // MARK: Delete protection
+
+    func setBlockAppDeletion(_ on: Bool) {
+        if on {
+            updateBlockAppDeletion(true)
+            return
+        }
+        if isLimitLocked {
+            unlockRequest = UnlockRequest(target: .allowAppDeletion)
+            return
+        }
+        Task {
+            if await OwnerCheck.confirm(reason: "Allow deleting apps again") {
+                updateBlockAppDeletion(false)
+            } else {
+                ActivityLog.add("Delete protection stays on: the Face ID or passcode check didn't pass")
+            }
+        }
+    }
+
+    private func updateBlockAppDeletion(_ on: Bool) {
+        var next = SharedStore.settings
+        next.blockAppDeletion = on
+        SharedStore.settings = next
+        ShieldEngine.applyDeletionGuard(on)
+        saved = next
+        draft.blockAppDeletion = on
+        ActivityLog.add(on ? "Delete protection on: no app can be deleted" : "Delete protection off")
     }
 
     // MARK: Unlocking
@@ -363,25 +405,30 @@ final class AppModel: ObservableObject {
         }
         if request.source == .app, let token = request.appToken {
             ActivityLog.add("Unlock request: that app (named by the lock screen buttons)")
-            return UnlockRequest(target: .app(token))
+            return UnlockRequest(target: .apps([token]))
         }
         // Tapping Unlock redraws the shield, and that redraw records the app on
         // screen. Only trust a record from that redraw or later.
         let record = ShieldStash.latest()
         if let record, record.at >= request.createdAt.addingTimeInterval(-2) {
             ActivityLog.add("Unlock request: that app (\(record.name ?? "unnamed"), recorded \(ActivityLog.timestamp(record.at)))")
-            return UnlockRequest(target: .app(record.token))
+            return UnlockRequest(target: .apps([record.token]))
         }
         let seen = record.map { "last record \(ActivityLog.timestamp($0.at)), before the tap" } ?? "no record at all"
-        ActivityLog.add("Unlock request: all apps, because the lock screen didn't say which app (\(seen))")
+        ActivityLog.add("Unlock request: asking which app, because the lock screen didn't say (\(seen))")
         return UnlockRequest(
-            target: .allApps,
-            note: "iOS didn't say which app you came from, so these scans open all apps."
+            target: .apps([]),
+            note: "iOS didn't say which app you came from, so pick it here."
         )
     }
 
     func requestUnlockAll() {
         unlockRequest = UnlockRequest(target: .allApps)
+    }
+
+    /// From the app itself: pick the app on the scan screen, then scan.
+    func requestUnlockApps() {
+        unlockRequest = UnlockRequest(target: .apps([]))
     }
 
     func cancelUnlock() {
@@ -402,19 +449,24 @@ final class AppModel: ObservableObject {
         var summary: String
 
         switch target {
-        case .app(let token):
+        case .apps(let tokens):
+            guard !tokens.isEmpty else { return "No app was picked, so nothing opened." }
             SharedStore.updateState { state in
-                state.appGrants.removeAll { $0.token == token }
-                state.appGrants.append(AppGrant(token: token, until: until))
+                for token in tokens {
+                    state.appGrants.removeAll { $0.token == token }
+                    state.appGrants.append(AppGrant(token: token, until: until))
+                }
                 if state.appGrants.count > 10 {
                     state.appGrants.removeFirst(state.appGrants.count - 10)
                 }
                 state.pending = nil
             }
             ShieldEngine.apply(now: now)
-            summary = "Open until \(Format.clock(until)). Head back to the app."
+            summary = tokens.count == 1
+                ? "Open until \(Format.clock(until)). Head back to the app."
+                : "\(tokens.count) apps are open until \(Format.clock(until))."
             if !Monitoring.scheduleTimer(endingAt: until) { summary += relockNote }
-            ActivityLog.add("Unlocked one app until \(Format.clock(until))")
+            ActivityLog.add("Unlocked \(tokens.count) app(s) until \(Format.clock(until))")
         case .allApps:
             SharedStore.updateState { state in
                 state.allAppsUntil = until
@@ -431,6 +483,10 @@ final class AppModel: ObservableObject {
         case .turnOff:
             turnOff()
             summary = "Super Screen Lock is off."
+        case .allowAppDeletion:
+            SharedStore.updateState { $0.pending = nil }
+            updateBlockAppDeletion(false)
+            summary = "Apps can be deleted again."
         }
 
         state = SharedStore.state

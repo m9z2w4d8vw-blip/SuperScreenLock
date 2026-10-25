@@ -7,6 +7,7 @@ import ManagedSettings
 final class LimitMonitorExtension: DeviceActivityMonitor {
     override func intervalDidStart(for activity: DeviceActivityName) {
         super.intervalDidStart(for: activity)
+        Heartbeat.mark(Heartbeat.monitor)
         guard activity == .daily else { return }
         // Fires at midnight and also whenever monitoring is (re)started.
         // Yesterday's lock is keyed to yesterday's date, so applying is enough
@@ -17,6 +18,7 @@ final class LimitMonitorExtension: DeviceActivityMonitor {
 
     override func intervalDidEnd(for activity: DeviceActivityName) {
         super.intervalDidEnd(for: activity)
+        Heartbeat.mark(Heartbeat.monitor)
         guard Monitoring.isTimer(activity) else { return }
         let locked = ShieldEngine.apply(now: Date(), grace: 30)
         DeviceActivityCenter().stopMonitoring([activity])
@@ -25,6 +27,7 @@ final class LimitMonitorExtension: DeviceActivityMonitor {
 
     override func eventDidReachThreshold(_ event: DeviceActivityEvent.Name, activity: DeviceActivityName) {
         super.eventDidReachThreshold(event, activity: activity)
+        Heartbeat.mark(Heartbeat.monitor)
         guard activity == .daily else { return }
         let settings = SharedStore.settings
         guard settings.isEnabled else { return }

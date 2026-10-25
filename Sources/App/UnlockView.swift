@@ -3,15 +3,18 @@ import ManagedSettings
 import SwiftUI
 
 /// The scan screen: one checkbox per required scan, and one tap per scan.
+/// For a single-app unlock with no app named yet, it asks which app first.
 struct UnlockView: View {
     @EnvironmentObject private var model: AppModel
     @StateObject private var session: ScanSession
     @State private var result: String?
+    @State private var picked = FamilyActivitySelection()
+    @State private var choosingApps = false
     private let target: UnlockRequest.Target
     private let note: String?
 
-    init(request: UnlockRequest, requiredScans: Int, method: String) {
-        _session = StateObject(wrappedValue: ScanSession(required: requiredScans, method: method))
+    init(request: UnlockRequest, requiredScans: Int, method: String, restartOnFail: Bool) {
+        _session = StateObject(wrappedValue: ScanSession(required: requiredScans, method: method, restartOnFail: restartOnFail))
         target = request.target
         note = request.note
     }
@@ -61,12 +64,39 @@ struct UnlockView: View {
             }
             .scrollIndicators(.hidden)
         }
+        .familyActivityPicker(isPresented: $choosingApps, selection: $picked)
         .onAppear {
             session.onFinish = { finish() }
         }
         .onDisappear {
             session.stop()
         }
+    }
+
+    // MARK: Which apps
+
+    /// Apps named by the request, or picked here when the request named none.
+    private var presetApps: [ApplicationToken] {
+        if case .apps(let tokens) = target { return tokens }
+        return []
+    }
+
+    private var isAppsTarget: Bool {
+        if case .apps = target { return true }
+        return false
+    }
+
+    private var chosenApps: [ApplicationToken] {
+        presetApps.isEmpty ? Array(picked.applicationTokens) : presetApps
+    }
+
+    private var needsChoice: Bool {
+        isAppsTarget && chosenApps.isEmpty && result == nil
+    }
+
+    /// What actually opens once every scan passes.
+    private var finalTarget: UnlockRequest.Target {
+        isAppsTarget ? .apps(chosenApps) : target
     }
 
     // MARK: Text
@@ -79,12 +109,14 @@ struct UnlockView: View {
     private var headline: String {
         if result != nil {
             switch target {
-            case .app: return "It's open."
+            case .apps: return chosenApps.count > 1 ? "They're open." : "It's open."
             case .allApps: return "Everything's open."
             case .saveSettings: return "Changes saved."
             case .turnOff: return "The lock is off."
+            case .allowAppDeletion: return "Deleting is back on."
             }
         }
+        if needsChoice { return "Choose the app." }
         switch session.phase {
         case .ready:
             if session.completed == 0 {
@@ -94,7 +126,9 @@ struct UnlockView: View {
         case .scanning:
             return "Scanning \(session.nextScan) of \(session.required)."
         case .failed:
-            return "Scan \(session.nextScan) didn't count."
+            return session.completed == 0 && session.restartOnFail
+                ? "Back to 0 of \(session.required)."
+                : "Scan \(session.nextScan) didn't count."
         case .finished:
             return "All \(session.required) done."
         }
@@ -105,16 +139,30 @@ struct UnlockView: View {
     }
 
     private var targetDescription: some View {
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: 8) {
             switch target {
-            case .app(let token):
-                Label(token)
-                    .labelStyle(.titleAndIcon)
-                    .font(.title3.weight(.semibold))
-                    .foregroundStyle(Color.white)
-                Text("Opens for \(window), then locks again.")
-                    .font(Theme.body)
-                    .foregroundStyle(Theme.mint)
+            case .apps:
+                if chosenApps.isEmpty {
+                    Text("Pick the app to open for \(window). You can pick more than one.")
+                        .font(Theme.body)
+                        .foregroundStyle(Theme.mint)
+                        .fixedSize(horizontal: false, vertical: true)
+                } else {
+                    ForEach(chosenApps, id: \.self) { token in
+                        Label(token)
+                            .labelStyle(.titleAndIcon)
+                            .font(.title3.weight(.semibold))
+                            .foregroundStyle(Color.white)
+                    }
+                    Text(chosenApps.count > 1 ? "Open for \(window), then they lock again." : "Opens for \(window), then locks again.")
+                        .font(Theme.body)
+                        .foregroundStyle(Theme.mint)
+                }
+                if !picked.categoryTokens.isEmpty && picked.applicationTokens.isEmpty {
+                    Text("Categories can't be opened on their own. Pick single apps.")
+                        .font(Theme.small)
+                        .foregroundStyle(Theme.mint)
+                }
             case .allApps:
                 Text("All apps")
                     .font(.title3.weight(.semibold))
@@ -138,6 +186,14 @@ struct UnlockView: View {
                     .font(Theme.body)
                     .foregroundStyle(Theme.mint)
                     .fixedSize(horizontal: false, vertical: true)
+            case .allowAppDeletion:
+                Text("Allowing app deletion")
+                    .font(.title3.weight(.semibold))
+                    .foregroundStyle(Color.white)
+                Text("Today's limit is used up, so this takes the same scans as unlocking.")
+                    .font(Theme.body)
+                    .foregroundStyle(Theme.mint)
+                    .fixedSize(horizontal: false, vertical: true)
             }
             if let note {
                 Text(note)
@@ -151,10 +207,14 @@ struct UnlockView: View {
 
     private var statusLine: String {
         if let result { return result }
+        if needsChoice {
+            return "Then scan \(model.biometryName) \(Format.times(session.required)), one tap each."
+        }
         switch session.phase {
         case .ready:
             if session.completed == 0 {
-                return "Each scan needs its own tap. Tap the button when you're ready."
+                let restart = session.restartOnFail ? " A failed scan starts you over." : ""
+                return "Each scan needs its own tap. Tap the button when you're ready.\(restart)"
             }
             let left = session.required - session.completed
             return left == 1
@@ -192,9 +252,18 @@ struct UnlockView: View {
                 PrimaryButton(title: "Done") {
                     close()
                 }
+            } else if needsChoice {
+                PrimaryButton(title: "Choose the app") {
+                    choosingApps = true
+                }
             } else {
                 PrimaryButton(title: scanButtonTitle, enabled: session.canScan) {
                     session.scanOnce()
+                }
+                if isAppsTarget && presetApps.isEmpty && session.completed == 0 && session.phase != .scanning {
+                    TextLink(title: "Pick a different app") {
+                        choosingApps = true
+                    }
                 }
             }
         }
@@ -203,7 +272,7 @@ struct UnlockView: View {
     private var scanButtonTitle: String {
         switch session.phase {
         case .scanning: return "Scanning…"
-        case .failed: return "Try scan \(session.nextScan) again"
+        case .failed: return session.completed == 0 && session.restartOnFail ? "Start over" : "Try scan \(session.nextScan) again"
         case .ready, .finished: return "Scan \(session.nextScan) of \(session.required)"
         }
     }
@@ -211,7 +280,7 @@ struct UnlockView: View {
     // MARK: Actions
 
     private func finish() {
-        result = model.completeUnlock(target)
+        result = model.completeUnlock(finalTarget)
     }
 
     private func close() {

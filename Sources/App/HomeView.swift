@@ -6,6 +6,7 @@ struct HomeView: View {
     @EnvironmentObject private var model: AppModel
     @State private var pickingAllowedApps = false
     @State private var showingDiagnostics = false
+    @State private var pickingExtraApps = false
     @FocusState private var customFieldFocused: Bool
 
     var body: some View {
@@ -14,8 +15,10 @@ struct HomeView: View {
             TimelineView(.periodic(from: .now, by: 30)) { _ in
                 VStack(alignment: .leading, spacing: 0) {
                     Hero(symbol: heroSymbol, headline: headline, message: message)
+                    ScreenTimeToday()
+                        .padding(.top, 28)
                     Rule()
-                        .padding(.top, 36)
+                        .padding(.top, 24)
                     if hasOpenApps {
                         openNow
                         Rule()
@@ -39,7 +42,6 @@ struct HomeView: View {
                 }
             }
         }
-        .familyActivityPicker(isPresented: $pickingAllowedApps, selection: $model.allowedSelection)
         .sheet(isPresented: $showingDiagnostics) {
             DiagnosticsView()
                 .environmentObject(model)
@@ -146,6 +148,14 @@ struct HomeView: View {
                 }
             }
             Rule()
+            CheckRow(
+                title: "Block deleting apps",
+                detail: deletionDetail,
+                isOn: model.saved.blockAppDeletion
+            ) {
+                model.setBlockAppDeletion(!model.saved.blockAppDeletion)
+            }
+            Rule()
             ValueRow(
                 title: "Daily limit",
                 detail: "All screen time counts toward it.",
@@ -166,6 +176,14 @@ struct HomeView: View {
                 increment: { model.stepScans(up: true) }
             )
             Rule()
+            CheckRow(
+                title: "Start over if a scan fails",
+                detail: "A scan that doesn't pass, or that you cancel, sends the count back to 0.",
+                isOn: model.draft.restartOnFail
+            ) {
+                model.draft.restartOnFail.toggle()
+            }
+            Rule()
             unlockLength
             Rule()
             ChoiceRow(
@@ -180,7 +198,51 @@ struct HomeView: View {
             Rule()
             allowedRow
             Rule()
+            extraLockRow
+            Rule()
         }
+    }
+
+    private var deletionDetail: String {
+        if model.saved.blockAppDeletion {
+            return "No app can be deleted right now, this one included. Turning this off takes \(model.biometryName) or your passcode."
+        }
+        return "Stops Super Screen Lock from being deleted. iOS applies it to every app while it's on."
+    }
+
+    private var extraLockRow: some View {
+        Button {
+            pickingExtraApps = true
+        } label: {
+            HStack(alignment: .center, spacing: 12) {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Also lock")
+                        .font(Theme.label)
+                        .foregroundStyle(Color.white)
+                    Text("iOS leaves some built-in apps open when it locks everything, like Safari and Files. Pick them here and they lock too.")
+                        .font(Theme.small)
+                        .foregroundStyle(Theme.mint)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                Spacer(minLength: 8)
+                Text(count(model.extraLockSelection.applicationTokens.count))
+                    .font(Theme.headline(30))
+                    .foregroundStyle(Color.white)
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(Theme.mint)
+            }
+            .padding(.vertical, 18)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Also lock, \(count(model.extraLockSelection.applicationTokens.count))")
+        .familyActivityPicker(isPresented: $pickingExtraApps, selection: $model.extraLockSelection)
+    }
+
+    private func count(_ apps: Int) -> String {
+        if apps == 0 { return "None" }
+        return apps == 1 ? "1 app" : "\(apps) apps"
     }
 
     private var unlockOptions: [Choice<Int>] {
@@ -261,6 +323,7 @@ struct HomeView: View {
         .buttonStyle(.plain)
         .accessibilityLabel("Always allowed, \(allowedSummary)")
         .accessibilityHint(allowedDetail)
+        .familyActivityPicker(isPresented: $pickingAllowedApps, selection: $model.allowedSelection)
     }
 
     private var allowedSummary: String {
@@ -285,8 +348,15 @@ struct HomeView: View {
                 }
             }
             if model.isShielding {
-                SecondaryButton(title: "Open all apps for \(Format.duration(minutes: model.saved.unlockMinutes))") {
-                    model.requestUnlockAll()
+                let length = Format.duration(minutes: model.saved.unlockMinutes)
+                if model.saved.unlockScope == .thatApp {
+                    SecondaryButton(title: "Open an app for \(length)") {
+                        model.requestUnlockApps()
+                    }
+                } else {
+                    SecondaryButton(title: "Open all apps for \(length)") {
+                        model.requestUnlockAll()
+                    }
                 }
             }
         }

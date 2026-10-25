@@ -18,6 +18,7 @@ final class ShieldButtonsHandler: ShieldActionDelegate {
     }
 
     private func respond(to action: ShieldAction, request: PendingUnlock, completionHandler: @escaping (ShieldActionResponse) -> Void) {
+        Heartbeat.mark(Heartbeat.buttons)
         switch action {
         case .primaryButtonPressed:
             // A lock left over from yesterday (or an expired test lock) clears

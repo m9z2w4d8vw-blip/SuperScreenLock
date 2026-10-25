@@ -19,6 +19,13 @@ struct LockSettings: Codable, Equatable {
     var unlockIsCustom = false
     var unlockScope: UnlockScope = .thatApp
     var allowedApps: Set<ApplicationToken> = []
+    /// Built-in apps that "lock everything" leaves open (Safari, Files and others),
+    /// locked one by one instead.
+    var extraLockedApps: Set<ApplicationToken> = []
+    /// A scan that doesn't pass sends the count back to zero.
+    var restartOnFail = false
+    /// iOS's "Deleting Apps: Don't Allow", applied while this is on.
+    var blockAppDeletion = false
     var biometryName = "Face ID"
 
     static let scanRange = 1...50
@@ -29,7 +36,8 @@ struct LockSettings: Codable, Equatable {
     init() {}
 
     private enum CodingKeys: String, CodingKey {
-        case isEnabled, dailyLimitMinutes, requiredScans, unlockMinutes, unlockIsCustom, unlockScope, allowedApps, biometryName
+        case isEnabled, dailyLimitMinutes, requiredScans, unlockMinutes, unlockIsCustom, unlockScope, allowedApps
+        case extraLockedApps, restartOnFail, blockAppDeletion, biometryName
     }
 
     // Lenient on purpose: a missing key falls back to its default instead of
@@ -44,6 +52,9 @@ struct LockSettings: Codable, Equatable {
         unlockIsCustom = (try? c.decode(Bool.self, forKey: .unlockIsCustom)) ?? !LockSettings.unlockChoices.contains(unlockMinutes)
         unlockScope = (try? c.decode(UnlockScope.self, forKey: .unlockScope)) ?? .thatApp
         allowedApps = (try? c.decode(Set<ApplicationToken>.self, forKey: .allowedApps)) ?? []
+        extraLockedApps = (try? c.decode(Set<ApplicationToken>.self, forKey: .extraLockedApps)) ?? []
+        restartOnFail = (try? c.decode(Bool.self, forKey: .restartOnFail)) ?? false
+        blockAppDeletion = (try? c.decode(Bool.self, forKey: .blockAppDeletion)) ?? false
         biometryName = (try? c.decode(String.self, forKey: .biometryName)) ?? "Face ID"
     }
 }

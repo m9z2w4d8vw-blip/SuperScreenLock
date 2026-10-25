@@ -16,8 +16,13 @@ enum DebugReport {
             }
         }
         let url = folder.appendingPathComponent(prefix + fileStamp(now) + ".txt")
+        let text = make(model: model, now: now)
         do {
-            try make(model: model, now: now).write(to: url, atomically: true, encoding: .utf8)
+            try text.write(to: url, atomically: true, encoding: .utf8)
+            // Files › On My iPhone › Super Screen Lock always has the latest one.
+            if let documents = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first {
+                try? text.write(to: documents.appendingPathComponent("Super Screen Lock debug log.txt"), atomically: true, encoding: .utf8)
+            }
             return url
         } catch {
             ActivityLog.add("Couldn't write the debug log file: \(error.localizedDescription)")
@@ -67,6 +72,22 @@ enum DebugReport {
         let activities = model.scheduledActivities
         lines.append("  Scheduled: \(activities.isEmpty ? "nothing" : activities.joined(separator: ", "))")
         lines.append("  Early-callback restarts today: \(state.rearmDay == today ? state.rearmCount : 0)")
+        lines.append("  Start over if a scan fails: \(settings.restartOnFail ? "on" : "off")")
+        lines.append("  Built-in apps locked by name: \(settings.extraLockedApps.count)")
+        lines.append("  Block deleting apps: \(settings.blockAppDeletion ? "on" : "off")")
+        lines.append("")
+        lines.append("Extensions")
+        let plugins = ExtensionCheck.registeredPlugIns()
+        lines.append("  Registered with iOS: \(plugins.isEmpty ? "none reported" : plugins.joined(separator: ", "))")
+        lines.append("  Monitor last ran: \(Heartbeat.last(Heartbeat.monitor).map(ActivityLog.timestamp) ?? "never")")
+        lines.append("  Lock screen look last ran: \(Heartbeat.last(Heartbeat.look).map(ActivityLog.timestamp) ?? "never")")
+        lines.append("  Lock screen buttons last ran: \(Heartbeat.last(Heartbeat.buttons).map(ActivityLog.timestamp) ?? "never")")
+        lines.append("  Report extension bundled: \(ExtensionCheck.reportBundled() ? "yes" : "no")")
+        let store = ManagedSettingsStore(named: .superScreenLock)
+        let categories = store.shield.applicationCategories == nil ? "off" : "on"
+        lines.append("  Shield store now: categories \(categories), apps locked by name \(store.shield.applications?.count ?? 0)")
+        let guardOn = ManagedSettingsStore(named: .deletionGuard).application.denyAppRemoval == true
+        lines.append("  Delete protection store now: \(guardOn ? "on" : "off")")
         lines.append("")
         lines.append("Log, oldest first")
         let log = ActivityLog.textLog()
@@ -88,5 +109,34 @@ enum DebugReport {
         return withUnsafeBytes(of: &system.machine) { buffer in
             String(decoding: buffer.prefix(while: { $0 != 0 }), as: UTF8.self)
         }
+    }
+}
+
+/// What iOS knows about this app's extensions. LaunchServices' private API is
+/// fine here because this build is only ever installed with TrollStore.
+enum ExtensionCheck {
+    static func registeredPlugIns() -> [String] {
+        guard let bundleID = Bundle.main.bundleIdentifier,
+              let proxyClass = NSClassFromString("LSApplicationProxy") else { return [] }
+        let classObject = proxyClass as AnyObject
+        let makeProxy = NSSelectorFromString("applicationProxyForIdentifier:")
+        guard classObject.responds(to: makeProxy),
+              let proxy = classObject.perform(makeProxy, with: bundleID)?.takeUnretainedValue() as? NSObject else { return [] }
+        let listPlugins = NSSelectorFromString("plugInKitPlugins")
+        guard proxy.responds(to: listPlugins),
+              let plugins = proxy.perform(listPlugins)?.takeUnretainedValue() as? [NSObject] else { return [] }
+        let readID = NSSelectorFromString("bundleIdentifier")
+        return plugins.compactMap { plugin -> String? in
+            guard plugin.responds(to: readID) else { return nil }
+            let identifier = plugin.perform(readID)?.takeUnretainedValue() as? String
+            return identifier.map { $0.components(separatedBy: ".").last ?? $0 }
+        }
+        .sorted()
+    }
+
+    /// The screen-time report lives in Extensions/, not PlugIns/.
+    static func reportBundled() -> Bool {
+        let path = Bundle.main.bundleURL.appendingPathComponent("Extensions/ActivityReport.appex").path
+        return FileManager.default.fileExists(atPath: path)
     }
 }

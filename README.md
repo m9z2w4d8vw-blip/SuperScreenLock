@@ -4,7 +4,7 @@ Set a daily screen time limit. When you hit it, every app locks until midnight, 
 
 ## How it works
 
-All screen time counts toward the limit. You don't pick apps for that.
+All screen time counts toward the limit. You don't pick apps for that. The home screen shows today's total, drawn by a small report extension, because iOS only hands usage numbers to that kind of extension.
 
 When the limit is reached, every app is covered by Super Screen Lock's lock screen. Tapping **Unlock with Face ID** sends a notification. Tap it, and Super Screen Lock opens the scan screen. Every scan needs its own tap of the Scan button, and each one is a fresh Face ID check, so iOS can't reuse an earlier match.
 
@@ -16,9 +16,19 @@ iOS won't run a re-lock timer shorter than 15 minutes, so short unlocks use a 16
 
 While the limit is used up, saving settings or turning the lock off takes the same scans.
 
+**Open an app** (in the app, when Scanning opens is set to That app) asks which app first, then runs the scans, so a single app can be opened even when iOS's lock screen doesn't say which app you came from.
+
+**Start over if a scan fails** sends the count back to zero on any scan that doesn't pass, including a cancelled one.
+
+**Also lock** covers the built-in apps that iOS leaves out when it locks everything, such as Safari and Files. Apps picked there are locked by name, which iOS honors even for its own apps.
+
+**Block deleting apps** turns on iOS's "Deleting Apps: Don't Allow" restriction. iOS applies it to every app, not just this one. Turning it off takes Face ID or the passcode, or the full scans if today's limit is used up. Removing Super Screen Lock's Screen Time access in Settings lifts it, and TrollStore can still uninstall apps on its own.
+
 ## Install
 
-The GitHub Actions workflow builds on every push to `main`, signs the app and its three extensions with their entitlements using ldid, and publishes `SuperScreenLock.ipa` to Releases. Open it with TrollStore.
+The GitHub Actions workflow builds on every push to `main` and publishes `SuperScreenLock.ipa` to Releases. Open it with TrollStore.
+
+The workflow is a thin wrapper around `ci/build.sh`, which does the real work: it builds the app, builds the screen-time report from its own spec (`report.yml`) so a problem there can't stop the app from building, copies the report into `Extensions/`, and signs every binary with its entitlements using ldid. Build changes go in the script, so the workflow file shouldn't need editing again.
 
 Free Apple ID sideloading (AltStore, Sideloadly) won't work. Those certificates can't carry the Family Controls entitlement that Screen Time requires.
 
@@ -26,7 +36,7 @@ Free Apple ID sideloading (AltStore, Sideloadly) won't work. Those certificates 
 
 Tap **Diagnostics and test lock** at the bottom of the home screen, then check **Test lock**. That locks everything right away, even if an unlock window is open, so you can try the full unlock flow without using up your limit.
 
-The same screen has **Share debug log (.txt)**. The file starts with a status snapshot and then has everything the app and all three extensions logged, oldest first. The log itself is kept in `debug-log.txt` in the App Group container and trimmed to about a megabyte.
+The same screen has **Share debug log (.txt)** and **Copy debug log**, and the latest export is always in Files › On My iPhone › Super Screen Lock. The file starts with a status snapshot and then has everything the app and all three extensions logged, oldest first. The log itself is kept in `debug-log.txt` in the App Group container and trimmed to about a megabyte.
 
 ## Things to know
 
@@ -46,5 +56,8 @@ Sources/SharedUI       Palette and the dial drawing, used by the app and lock sc
 Sources/LimitMonitor   Wakes at the limit, at midnight and when an unlock ends
 Sources/ShieldLook     Draws the lock screen over a locked app
 Sources/ShieldButtons  Handles the lock screen's buttons
+Sources/ActivityReport Draws today's screen time (an ExtensionKit extension in Extensions/)
+report.yml             XcodeGen spec for the report extension alone
+ci/build.sh            Everything the workflow runs
 Resources/             Asset catalog and app icon
 ```

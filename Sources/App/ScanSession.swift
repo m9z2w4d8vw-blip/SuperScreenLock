@@ -40,13 +40,16 @@ final class ScanSession: ObservableObject {
 
     let required: Int
     let method: String
+    /// When on, any scan that doesn't pass sends the count back to zero.
+    let restartOnFail: Bool
     var onFinish: (() -> Void)?
 
     private var context: LAContext?
 
-    init(required: Int, method: String) {
+    init(required: Int, method: String, restartOnFail: Bool) {
         self.required = max(1, required)
         self.method = method
+        self.restartOnFail = restartOnFail
     }
 
     var nextScan: Int { min(completed + 1, required) }
@@ -81,8 +84,7 @@ final class ScanSession: ObservableObject {
                 localizedReason: "Scan \(number) of \(required) to unlock"
             )
             guard passed else {
-                phase = .failed("That scan didn't count. Tap Scan to try it again.")
-                ActivityLog.add("Scan \(number) of \(required) didn't count")
+                fail("That scan didn't count.", number: number)
                 return
             }
             completed += 1
@@ -96,7 +98,22 @@ final class ScanSession: ObservableObject {
                 phase = .ready
             }
         } catch {
-            let message = explain(error as NSError)
+            let nsError = error as NSError
+            // .appCancel is this screen closing, not a failed scan.
+            if LAError.Code(rawValue: nsError.code) == .appCancel {
+                phase = .failed(explain(nsError))
+                return
+            }
+            fail(explain(nsError), number: number)
+        }
+    }
+
+    private func fail(_ message: String, number: Int) {
+        if restartOnFail && completed > 0 {
+            completed = 0
+            phase = .failed("\(message) Start over is on, so you're back to 0 of \(required).")
+            ActivityLog.add("Scan \(number) of \(required) didn't count, so the count reset: \(message)")
+        } else {
             phase = .failed(message)
             ActivityLog.add("Scan \(number) of \(required) didn't count: \(message)")
         }
@@ -143,6 +160,21 @@ final class ScanSession: ObservableObject {
             return "Set a passcode on this iPhone to unlock."
         default:
             return error.localizedDescription
+        }
+    }
+}
+
+/// One Face ID check that falls back to the passcode, for turning off delete protection.
+enum OwnerCheck {
+    @MainActor
+    static func confirm(reason: String) async -> Bool {
+        let context = LAContext()
+        var error: NSError?
+        guard context.canEvaluatePolicy(.deviceOwnerAuthentication, error: &error) else { return false }
+        do {
+            return try await context.evaluatePolicy(.deviceOwnerAuthentication, localizedReason: reason)
+        } catch {
+            return false
         }
     }
 }

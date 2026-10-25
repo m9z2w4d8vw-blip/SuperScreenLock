@@ -3,6 +3,8 @@ import ManagedSettings
 
 extension ManagedSettingsStore.Name {
     static let superScreenLock = Self("superScreenLock")
+    /// Kept apart so clearing the shield never lifts delete protection.
+    static let deletionGuard = Self("deletionGuard")
 }
 
 /// The single place that decides what's locked. The app and every extension
@@ -30,15 +32,30 @@ enum ShieldEngine {
 
         let store = ManagedSettingsStore(named: .superScreenLock)
         guard shouldLock(settings: settings, state: state, now: now) else {
-            store.clearAllSettings()
+            store.shield.applications = nil
+            store.shield.applicationCategories = nil
+            store.shield.webDomainCategories = nil
             noteChange("clear", "Shield off: every app is open")
             return false
         }
         let open = exceptions(settings: settings, state: state)
-        store.shield.applications = nil
+        // "Lock everything" skips Safari, Files and other built-ins. Apps picked
+        // by name are locked even so, unless they're unlocked right now.
+        let unlocked = Set(state.appGrants.map(\.token))
+        let byName = Set(settings.extraLockedApps.subtracting(unlocked).prefix(50))
         store.shield.applicationCategories = .all(except: open)
-        noteChange("locked:\(open.count)", "Shield on: everything locked except \(open.count) app\(open.count == 1 ? "" : "s")")
+        store.shield.applications = byName.isEmpty ? nil : byName
+        noteChange(
+            "locked:\(open.count):\(byName.count)",
+            "Shield on: everything locked except \(open.count) app(s), plus \(byName.count) built-in app(s) locked by name"
+        )
         return true
+    }
+
+    /// iOS's app-removal restriction. It applies to every app, not just this one.
+    static func applyDeletionGuard(_ enabled: Bool) {
+        let store = ManagedSettingsStore(named: .deletionGuard)
+        store.application.denyAppRemoval = enabled ? true : nil
     }
 
     /// apply() runs constantly, so only log when the result differs from last time.

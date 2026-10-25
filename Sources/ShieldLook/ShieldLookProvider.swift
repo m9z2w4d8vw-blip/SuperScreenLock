@@ -5,21 +5,25 @@ import UIKit
 /// Draws the screen that covers a locked app.
 final class ShieldLookProvider: ShieldConfigurationDataSource {
     override func configuration(shielding application: Application) -> ShieldConfiguration {
+        Heartbeat.mark(Heartbeat.look)
         ShieldStash.remember(application)
         return ShieldDesign.make(name: application.localizedDisplayName)
     }
 
     override func configuration(shielding application: Application, in category: ActivityCategory) -> ShieldConfiguration {
+        Heartbeat.mark(Heartbeat.look)
         ShieldStash.remember(application)
         return ShieldDesign.make(name: application.localizedDisplayName)
     }
 
     override func configuration(shielding webDomain: WebDomain) -> ShieldConfiguration {
-        ShieldDesign.make(name: webDomain.domain)
+        Heartbeat.mark(Heartbeat.look)
+        return ShieldDesign.make(name: webDomain.domain)
     }
 
     override func configuration(shielding webDomain: WebDomain, in category: ActivityCategory) -> ShieldConfiguration {
-        ShieldDesign.make(name: webDomain.domain)
+        Heartbeat.mark(Heartbeat.look)
+        return ShieldDesign.make(name: webDomain.domain)
     }
 }
 
