@@ -12,12 +12,7 @@ concurrency:
   group: build-${{ github.ref }}
   cancel-in-progress: true
 
-env:
-  APP_NAME: SuperScreenLock
-  EXTENSIONS: LimitMonitor ShieldLook ShieldButtons
-  HOMEBREW_NO_AUTO_UPDATE: "1"
-  HOMEBREW_NO_INSTALL_CLEANUP: "1"
-
+# The build itself is in ci/build.sh, so this file shouldn't need editing again.
 jobs:
   build:
     name: Build and publish IPA
@@ -28,151 +23,30 @@ jobs:
       - name: Check out
         uses: actions/checkout@v5
 
-      - name: Check repo layout
-        run: |
-          missing=0
-          for path in project.yml Sources/App Sources/Shared Sources/SharedUI Config Resources/Assets.xcassets; do
-            if [ ! -e "$path" ]; then
-              echo "::error::$path is missing from the top of the repo. Copy what's inside the zip into the repo root, not the folder around it."
-              missing=1
-            fi
-          done
-          for ext in $EXTENSIONS; do
-            if [ ! -d "Sources/$ext" ]; then echo "::error::Sources/$ext is missing"; missing=1; fi
-            if [ ! -f "Config/$ext.entitlements" ]; then echo "::error::Config/$ext.entitlements is missing"; missing=1; fi
-          done
-          if [ ! -f "Config/$APP_NAME.entitlements" ]; then echo "::error::Config/$APP_NAME.entitlements is missing"; missing=1; fi
-          if [ "$missing" -ne 0 ]; then
-            echo "Top level of the repo:"
-            ls -la
-            exit 1
-          fi
-
-      - name: Show toolchain
-        run: |
-          sw_vers
-          xcodebuild -version
-          xcrun --sdk iphoneos --show-sdk-version
-
-      - name: Install XcodeGen and ldid
-        run: brew install xcodegen ldid
-
-      - name: Generate Xcode project
-        run: |
-          xcodegen generate
-          xcodebuild -list -project "$APP_NAME.xcodeproj"
-
-      - name: Build for device
+      - name: Build, sign and package
         env:
           BUILD_NUMBER: ${{ github.run_number }}
         run: |
-          set -o pipefail
-          build() {
-            xcodebuild \
-              -project "$APP_NAME.xcodeproj" \
-              -scheme "$APP_NAME" \
-              -configuration Release \
-              -sdk iphoneos \
-              -destination 'generic/platform=iOS' \
-              -derivedDataPath build \
-              -quiet \
-              CODE_SIGN_IDENTITY="" \
-              CODE_SIGNING_REQUIRED=NO \
-              CODE_SIGNING_ALLOWED=NO \
-              CURRENT_PROJECT_VERSION="$BUILD_NUMBER" \
-              build 2>&1 | tee build.log
-          }
-          if ! build; then
-            if grep -qiE "is not installed|no simulator runtime|platform.*not.*installed" build.log; then
-              echo "::warning::The iOS platform is missing on this runner. Downloading it and retrying."
-              xcodebuild -downloadPlatform iOS
-              build
-            else
-              exit 1
-            fi
+          if [ ! -f ci/build.sh ]; then
+            echo "::error::ci/build.sh is missing. Copy everything from the zip into the repo, then push again."
+            exit 1
           fi
+          bash ci/build.sh build
 
       - name: List compiler errors
         if: failure()
-        run: |
-          if [ -f build.log ]; then
-            grep -E "error:" build.log | sort -u | head -40 | while IFS= read -r line; do
-              echo "::error::$line"
-            done
-          fi
-
-      - name: Sign with entitlements and package IPA
-        run: |
-          APP="build/Build/Products/Release-iphoneos/$APP_NAME.app"
-          if [ ! -d "$APP" ]; then
-            echo "::error::The build finished but $APP is missing"
-            find build/Build/Products -maxdepth 3 -print || true
-            exit 1
-          fi
-
-          # Screen Time only works if every binary carries Family Controls,
-          # so a missing entitlement fails the build instead of shipping a dud.
-          sign() {
-            ldid -S"$1" "$2"
-            ents="$(ldid -e "$2")"
-            case "$ents" in
-              *com.apple.developer.family-controls*) echo "Signed $2 with $1" ;;
-              *) echo "::error::$2 is missing the Family Controls entitlement after signing"; exit 1 ;;
-            esac
-          }
-
-          for EXT in $EXTENSIONS; do
-            APPEX="$APP/PlugIns/$EXT.appex"
-            if [ ! -f "$APPEX/$EXT" ]; then
-              echo "::error::$EXT.appex wasn't embedded in the app"
-              ls -la "$APP/PlugIns" || true
-              exit 1
-            fi
-            echo "$EXT extension point: $(plutil -extract NSExtension.NSExtensionPointIdentifier raw -o - "$APPEX/Info.plist")"
-            sign "Config/$EXT.entitlements" "$APPEX/$EXT"
-          done
-          sign "Config/$APP_NAME.entitlements" "$APP/$APP_NAME"
-
-          rm -rf Payload "$APP_NAME.ipa"
-          mkdir Payload
-          cp -R "$APP" Payload/
-          zip -qry "$APP_NAME.ipa" Payload
-          ls -lh "$APP_NAME.ipa"
+        run: bash ci/build.sh errors || true
 
       - name: Publish to Releases
         env:
           GH_TOKEN: ${{ github.token }}
           BUILD_NUMBER: ${{ github.run_number }}
           COMMIT_MESSAGE: ${{ github.event.head_commit.message }}
-        run: |
-          TAG="build-$BUILD_NUMBER"
-          SHORT_SHA="${GITHUB_SHA::7}"
-          {
-            echo "$APP_NAME build $BUILD_NUMBER from commit $SHORT_SHA, signed with ldid for TrollStore."
-            echo
-            if [ -n "$COMMIT_MESSAGE" ]; then
-              echo "$COMMIT_MESSAGE"
-              echo
-            fi
-            echo "Install by opening $APP_NAME.ipa with TrollStore."
-          } > release-notes.md
-          if gh release view "$TAG" >/dev/null 2>&1; then
-            gh release upload "$TAG" "$APP_NAME.ipa" --clobber
-          else
-            gh release create "$TAG" "$APP_NAME.ipa" \
-              --title "$APP_NAME build $BUILD_NUMBER" \
-              --notes-file release-notes.md \
-              --target "$GITHUB_SHA" \
-              --latest
-          fi
-          {
-            echo "### $APP_NAME build $BUILD_NUMBER"
-            echo "https://github.com/$GITHUB_REPOSITORY/releases/tag/$TAG"
-          } >> "$GITHUB_STEP_SUMMARY"
+        run: bash ci/build.sh publish
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ env.APP_NAME }}-build-${{ github.run_number }}
-          path: ${{ env.APP_NAME }}.ipa
+          name: SuperScreenLock-build-${{ github.run_number }}
+          path: SuperScreenLock.ipa
           if-no-files-found: error
