@@ -43,11 +43,20 @@ enum Monitoring {
         }
 
         // Written first: the monitor can be called before startMonitoring returns.
+        let previous = SharedStore.state
         SharedStore.updateState { state in
             state.monitoringStartedAt = Date()
             state.countsPastActivity = Monitoring.countsPastActivity
         }
-        try center.startMonitoring(.daily, during: schedule, events: events)
+        do {
+            try center.startMonitoring(.daily, during: schedule, events: events)
+        } catch {
+            SharedStore.updateState { state in
+                state.monitoringStartedAt = previous.monitoringStartedAt
+                state.countsPastActivity = previous.countsPastActivity
+            }
+            throw error
+        }
         ActivityLog.add("Daily schedule started: limit \(Format.duration(minutes: settings.dailyLimitMinutes)), counting from \(countsPastActivity ? "midnight" : "now")")
     }
 

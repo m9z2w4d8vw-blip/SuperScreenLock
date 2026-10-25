@@ -64,11 +64,7 @@ enum DebugReport {
         } else {
             lines.append("  Pending unlock: none")
         }
-        if let entry = ShieldStash.latest() {
-            lines.append("  Last lock screen record: \(entry.name ?? "unnamed app") at \(ActivityLog.timestamp(entry.at))")
-        } else {
-            lines.append("  Last lock screen record: none")
-        }
+        lines.append("  Recent apps in the unlock grid: \(RecentApps.all().count)")
         let activities = model.scheduledActivities
         lines.append("  Scheduled: \(activities.isEmpty ? "nothing" : activities.joined(separator: ", "))")
         lines.append("  Early-callback restarts today: \(state.rearmDay == today ? state.rearmCount : 0)")
@@ -80,7 +76,7 @@ enum DebugReport {
         let plugins = ExtensionCheck.registeredPlugIns()
         lines.append("  Registered with iOS: \(plugins.isEmpty ? "none reported" : plugins.joined(separator: ", "))")
         lines.append("  Monitor last ran: \(Heartbeat.last(Heartbeat.monitor).map(ActivityLog.timestamp) ?? "never")")
-        lines.append("  Lock screen look last ran: \(Heartbeat.last(Heartbeat.look).map(ActivityLog.timestamp) ?? "never")")
+        lines.append("  Lock screen look last ran: not recorded (iOS blocks that extension from saving anything)")
         lines.append("  Lock screen buttons last ran: \(Heartbeat.last(Heartbeat.buttons).map(ActivityLog.timestamp) ?? "never")")
         lines.append("  Report extension bundled: \(ExtensionCheck.reportBundled() ? "yes" : "no")")
         let store = ManagedSettingsStore(named: .superScreenLock)

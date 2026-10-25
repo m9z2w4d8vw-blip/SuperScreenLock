@@ -16,7 +16,9 @@ iOS won't run a re-lock timer shorter than 15 minutes, so short unlocks use a 16
 
 While the limit is used up, saving settings or turning the lock off takes the same scans.
 
-**Open an app** (in the app, when Scanning opens is set to That app) asks which app first, then runs the scans, so a single app can be opened even when iOS's lock screen doesn't say which app you came from.
+**Open an app** (in the app, when Scanning opens is set to That app) asks which app first, then runs the scans. The same screen appears after tapping Unlock on a lock screen, because iOS only tells the lock screen buttons an app's category, and the extension that draws the lock screen isn't allowed to save anything.
+
+The app picker is a grid of apps you've unlocked before, plus anything in Also lock, with an Other app tile for the system list. iOS doesn't give apps a list of recently used or open apps, so the grid learns from your unlocks.
 
 **Start over if a scan fails** sends the count back to zero on any scan that doesn't pass, including a cancelled one.
 
@@ -29,6 +31,8 @@ While the limit is used up, saving settings or turning the lock off takes the sa
 The GitHub Actions workflow builds on every push to `main` and publishes `SuperScreenLock.ipa` to Releases. Open it with TrollStore.
 
 The workflow is a thin wrapper around `ci/build.sh`, which does the real work: it builds the app, builds the screen-time report from its own spec (`report.yml`) so a problem there can't stop the app from building, copies the report into `Extensions/`, and signs every binary with its entitlements using ldid. Build changes go in the script, so the workflow file shouldn't need editing again.
+
+Every binary is signed with an `application-identifier` (team `SUPERLOCK1`). A provisioning profile would normally add one; without it, iOS refuses to schedule the daily limit or any re-lock.
 
 Free Apple ID sideloading (AltStore, Sideloadly) won't work. Those certificates can't carry the Family Controls entitlement that Screen Time requires.
 

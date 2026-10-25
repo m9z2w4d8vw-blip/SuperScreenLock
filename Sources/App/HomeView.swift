@@ -188,7 +188,7 @@ struct HomeView: View {
             Rule()
             ChoiceRow(
                 title: "Scanning opens",
-                detail: "If iOS can't tell which app you came from, scanning opens all apps.",
+                detail: "When iOS doesn't say which app you came from, you pick it from your recent apps before scanning.",
                 options: [
                     Choice(value: UnlockScope.thatApp, label: "That app"),
                     Choice(value: UnlockScope.allApps, label: "All apps"),

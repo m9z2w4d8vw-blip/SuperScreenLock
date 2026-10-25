@@ -5,25 +5,19 @@ import UIKit
 /// Draws the screen that covers a locked app.
 final class ShieldLookProvider: ShieldConfigurationDataSource {
     override func configuration(shielding application: Application) -> ShieldConfiguration {
-        Heartbeat.mark(Heartbeat.look)
-        ShieldStash.remember(application)
-        return ShieldDesign.make(name: application.localizedDisplayName)
+        ShieldDesign.make(name: application.localizedDisplayName)
     }
 
     override func configuration(shielding application: Application, in category: ActivityCategory) -> ShieldConfiguration {
-        Heartbeat.mark(Heartbeat.look)
-        ShieldStash.remember(application)
-        return ShieldDesign.make(name: application.localizedDisplayName)
+        ShieldDesign.make(name: application.localizedDisplayName)
     }
 
     override func configuration(shielding webDomain: WebDomain) -> ShieldConfiguration {
-        Heartbeat.mark(Heartbeat.look)
-        return ShieldDesign.make(name: webDomain.domain)
+        ShieldDesign.make(name: webDomain.domain)
     }
 
     override func configuration(shielding webDomain: WebDomain, in category: ActivityCategory) -> ShieldConfiguration {
-        Heartbeat.mark(Heartbeat.look)
-        return ShieldDesign.make(name: webDomain.domain)
+        ShieldDesign.make(name: webDomain.domain)
     }
 }
 
@@ -48,15 +42,15 @@ enum ShieldDesign {
         } else if state.freshPending(at: now) != nil {
             title = "Check your notifications"
             subtitle = "Tap the Super Screen Lock banner to start your \(Format.scans(settings.requiredScans, method: method)). No banner? Open Super Screen Lock yourself."
-            button = "Send it again"
+            button = "Send again"
         } else if settings.isEnabled && state.limitReached(on: now) {
             title = "\(subject) is locked"
             subtitle = "You've used today's \(Format.spokenDuration(minutes: settings.dailyLimitMinutes)). \(howTo)"
-            button = "Unlock with \(method)"
+            button = "Unlock"
         } else {
             title = "\(subject) is locked"
             subtitle = "This is a test lock. \(howTo)"
-            button = "Unlock with \(method)"
+            button = "Unlock"
         }
 
         return ShieldConfiguration(

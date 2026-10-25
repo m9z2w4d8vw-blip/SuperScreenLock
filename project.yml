@@ -69,7 +69,6 @@ targets:
       - path: Sources/Shared/SharedStore.swift
       - path: Sources/Shared/Format.swift
       - path: Sources/Shared/ShieldEngine.swift
-      - path: Sources/Shared/ShieldStash.swift
       - path: Sources/Shared/ActivityLog.swift
       - path: Sources/Shared/Heartbeat.swift
     settings:

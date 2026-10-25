@@ -1,3 +1,5 @@
+import FamilyControls
+import ManagedSettings
 import SwiftUI
 
 /// Icon, giant headline, body text. The top of every screen.
@@ -285,5 +287,75 @@ struct TextLink: View {
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+    }
+}
+
+/// An app's real icon and name, drawn by iOS from its Screen Time token.
+struct AppTile: View {
+    let token: ApplicationToken
+    let selected: Bool
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            VStack(spacing: 8) {
+                Label(token)
+                    .labelStyle(.iconOnly)
+                    .scaleEffect(2)
+                    .frame(width: 52, height: 52)
+                Label(token)
+                    .labelStyle(.titleOnly)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(selected ? Theme.green : Color.white)
+                    .lineLimit(1)
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 10)
+            .padding(.horizontal, 4)
+            .background(
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .fill(selected ? Color.white : Color.white.opacity(0.08))
+            )
+            .overlay(alignment: .topTrailing) {
+                if selected {
+                    Image(systemName: "checkmark.circle.fill")
+                        .font(.system(size: 16, weight: .bold))
+                        .foregroundStyle(Theme.green)
+                        .padding(5)
+                }
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityAddTraits(selected ? [.isSelected] : [])
+    }
+}
+
+/// Opens the system app list for anything that isn't in the grid yet.
+struct OtherAppTile: View {
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            VStack(spacing: 8) {
+                Image(systemName: "plus")
+                    .font(.system(size: 22, weight: .semibold))
+                    .foregroundStyle(Color.white)
+                    .frame(width: 52, height: 52)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 12, style: .continuous)
+                            .strokeBorder(Color.white.opacity(0.7), style: StrokeStyle(lineWidth: 1.5, dash: [4, 3]))
+                    )
+                Text("Other app")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(Color.white)
+                    .lineLimit(1)
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 10)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Pick another app")
     }
 }

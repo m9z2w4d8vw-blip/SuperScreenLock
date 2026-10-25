@@ -2,7 +2,11 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+	<key>application-identifier</key>
+	<string>SUPERLOCK1.com.parv.superscreenlock.ActivityReport</string>
 	<key>com.apple.developer.family-controls</key>
 	<true/>
+	<key>com.apple.developer.team-identifier</key>
+	<string>SUPERLOCK1</string>
 </dict>
 </plist>

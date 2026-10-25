@@ -18,8 +18,10 @@ struct SuperScreenLockApp: App {
                 .tint(Color.white)
         }
         .onChange(of: scenePhase) { phase in
-            if phase == .active {
-                model.refresh(reason: "Came to the front")
+            switch phase {
+            case .active: model.sceneBecameActive()
+            case .background: model.sceneWentToBackground()
+            default: break
             }
         }
     }

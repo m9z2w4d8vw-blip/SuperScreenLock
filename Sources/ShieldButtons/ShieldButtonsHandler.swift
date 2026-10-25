@@ -21,25 +21,31 @@ final class ShieldButtonsHandler: ShieldActionDelegate {
         Heartbeat.mark(Heartbeat.buttons)
         switch action {
         case .primaryButtonPressed:
-            // A lock left over from yesterday (or an expired test lock) clears
-            // here, and the app opens straight away.
-            guard ShieldEngine.apply() else {
-                ActivityLog.add("Lock had already ended; let the app through")
-                completionHandler(.none)
+            let settings = SharedStore.settings
+            // A lock left over from yesterday (or an expired test lock): clear it
+            // and close, so the app opens normally next time.
+            guard ShieldEngine.shouldLock(settings: settings, state: SharedStore.state, now: Date()) else {
+                ShieldEngine.apply()
+                completionHandler(.close)
+                ActivityLog.add("Lock had already ended, so it was cleared")
                 return
             }
+            // Saved first, because .defer redraws the shield right away and the
+            // redraw reads it to show "Check your notifications".
             SharedStore.updateState { $0.pending = request }
-            let settings = SharedStore.settings
-            ActivityLog.add(request.source == .app ? "Unlock requested for a locked app" : "Unlock requested from the lock screen")
+            // Fire and forget, then answer iOS at once. The shield stays frozen
+            // until completionHandler runs; waiting on the notification's
+            // callback once hung the whole phone for 30 seconds.
             Notifier.post(
                 id: "ssl.unlock",
                 title: "Tap to unlock",
                 body: "Start your \(Format.scans(settings.requiredScans, method: settings.biometryName)) in Super Screen Lock."
-            ) {
-                // .defer redraws the shield, which also lets the look extension
-                // record which app is on screen right now.
-                completionHandler(.defer)
+            )
+            completionHandler(.defer)
+            if let token = request.appToken {
+                RecentApps.note([token])
             }
+            ActivityLog.add(request.source == .app ? "Unlock requested for an app locked by name" : "Unlock requested from the lock screen")
         case .secondaryButtonPressed:
             completionHandler(.close)
         @unknown default:

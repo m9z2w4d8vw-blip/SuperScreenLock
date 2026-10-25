@@ -47,8 +47,6 @@ struct DiagnosticsView: View {
                     Rule()
                     statusRow("Each unlock lasts", Format.spokenDuration(minutes: model.saved.unlockMinutes))
                     Rule()
-                    statusRow("Lock screen last drawn", Heartbeat.last(Heartbeat.look).map(Format.clock) ?? "Never")
-                    Rule()
                     statusRow("Monitor last ran", Heartbeat.last(Heartbeat.monitor).map(Format.clock) ?? "Never")
                     Rule()
                     statusRow("Today's limit reached", model.isLimitLocked ? "Yes" : "No")

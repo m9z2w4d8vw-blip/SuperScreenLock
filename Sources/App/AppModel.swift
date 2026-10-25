@@ -50,6 +50,8 @@ final class AppModel: ObservableObject {
     static let customChoice = -1
 
     let biometry = Biometry.current()
+    private var lastDailyAttempt: Date?
+    private var wasInBackground = false
 
     init() {
         let settings = SharedStore.settings
@@ -186,7 +188,9 @@ final class AppModel: ObservableObject {
             SharedStore.settings = settings
         }
         if authorization == .approved {
-            if settings.isEnabled && !Monitoring.isDailyRunning() {
+            let retryDue = lastDailyAttempt.map { Date().timeIntervalSince($0) > 300 } ?? true
+            if settings.isEnabled && retryDue && !Monitoring.isDailyRunning() {
+                lastDailyAttempt = Date()
                 do {
                     try Monitoring.startDaily(settings: settings)
                     ActivityLog.add("The daily schedule was missing, so it was restarted")
@@ -210,6 +214,15 @@ final class AppModel: ObservableObject {
             ActivityLog.trimTextFile()
         }
         presentPendingUnlockIfNeeded()
+    }
+
+    func sceneBecameActive() {
+        refresh(reason: wasInBackground ? "Came to the front" : nil)
+        wasInBackground = false
+    }
+
+    func sceneWentToBackground() {
+        wasInBackground = true
     }
 
     /// FamilyControls can report its status a beat late on launch.
@@ -407,18 +420,10 @@ final class AppModel: ObservableObject {
             ActivityLog.add("Unlock request: that app (named by the lock screen buttons)")
             return UnlockRequest(target: .apps([token]))
         }
-        // Tapping Unlock redraws the shield, and that redraw records the app on
-        // screen. Only trust a record from that redraw or later.
-        let record = ShieldStash.latest()
-        if let record, record.at >= request.createdAt.addingTimeInterval(-2) {
-            ActivityLog.add("Unlock request: that app (\(record.name ?? "unnamed"), recorded \(ActivityLog.timestamp(record.at)))")
-            return UnlockRequest(target: .apps([record.token]))
-        }
-        let seen = record.map { "last record \(ActivityLog.timestamp($0.at)), before the tap" } ?? "no record at all"
-        ActivityLog.add("Unlock request: asking which app, because the lock screen didn't say (\(seen))")
+        ActivityLog.add("Unlock request: asking which app, because iOS only told the lock screen the app's category")
         return UnlockRequest(
             target: .apps([]),
-            note: "iOS didn't say which app you came from, so pick it here."
+            note: "iOS doesn't say which app you came from, so pick it here."
         )
     }
 
@@ -462,6 +467,7 @@ final class AppModel: ObservableObject {
                 state.pending = nil
             }
             ShieldEngine.apply(now: now)
+            RecentApps.note(tokens, at: now)
             summary = tokens.count == 1
                 ? "Open until \(Format.clock(until)). Head back to the app."
                 : "\(tokens.count) apps are open until \(Format.clock(until))."

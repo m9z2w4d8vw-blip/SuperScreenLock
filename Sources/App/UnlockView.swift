@@ -10,13 +10,25 @@ struct UnlockView: View {
     @State private var result: String?
     @State private var picked = FamilyActivitySelection()
     @State private var choosingApps = false
+    /// Apps shown in the grid: recent unlocks, then anything in Also lock.
+    @State private var tiles: [ApplicationToken]
+    @State private var selection: Set<ApplicationToken> = []
     private let target: UnlockRequest.Target
     private let note: String?
 
     init(request: UnlockRequest, requiredScans: Int, method: String, restartOnFail: Bool) {
         _session = StateObject(wrappedValue: ScanSession(required: requiredScans, method: method, restartOnFail: restartOnFail))
+        _tiles = State(initialValue: Self.startingTiles())
         target = request.target
         note = request.note
+    }
+
+    private static func startingTiles() -> [ApplicationToken] {
+        var tokens = RecentApps.all().map(\.token)
+        for token in SharedStore.settings.extraLockedApps where !tokens.contains(token) {
+            tokens.append(token)
+        }
+        return tokens
     }
 
     var body: some View {
@@ -65,6 +77,15 @@ struct UnlockView: View {
             .scrollIndicators(.hidden)
         }
         .familyActivityPicker(isPresented: $choosingApps, selection: $picked)
+        .onChange(of: choosingApps) { showing in
+            // Apps picked in the system list join the grid, already selected.
+            guard !showing else { return }
+            let fresh = picked.applicationTokens
+            for token in fresh where !tiles.contains(token) {
+                tiles.insert(token, at: 0)
+            }
+            selection.formUnion(fresh)
+        }
         .onAppear {
             session.onFinish = { finish() }
         }
@@ -87,11 +108,17 @@ struct UnlockView: View {
     }
 
     private var chosenApps: [ApplicationToken] {
-        presetApps.isEmpty ? Array(picked.applicationTokens) : presetApps
+        if !presetApps.isEmpty { return presetApps }
+        return tiles.filter { selection.contains($0) }
     }
 
     private var needsChoice: Bool {
         isAppsTarget && chosenApps.isEmpty && result == nil
+    }
+
+    /// The grid stays up until the first scan, so the choice can still change.
+    private var showsGrid: Bool {
+        isAppsTarget && presetApps.isEmpty && result == nil && session.completed == 0 && session.phase != .scanning
     }
 
     /// What actually opens once every scan passes.
@@ -142,11 +169,21 @@ struct UnlockView: View {
         VStack(alignment: .leading, spacing: 8) {
             switch target {
             case .apps:
-                if chosenApps.isEmpty {
-                    Text("Pick the app to open for \(window). You can pick more than one.")
+                if showsGrid {
+                    Text(tiles.isEmpty
+                         ? "Pick the app to open for \(window)."
+                         : "Tap the app to open for \(window). You can pick more than one.")
                         .font(Theme.body)
                         .foregroundStyle(Theme.mint)
                         .fixedSize(horizontal: false, vertical: true)
+                    appGrid
+                        .padding(.top, 10)
+                    if tiles.isEmpty {
+                        Text("Apps you unlock show up here, so next time it's one tap.")
+                            .font(Theme.small)
+                            .foregroundStyle(Theme.mint)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
                 } else {
                     ForEach(chosenApps, id: \.self) { token in
                         Label(token)
@@ -232,6 +269,23 @@ struct UnlockView: View {
 
     // MARK: Pieces
 
+    private var appGrid: some View {
+        LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 10), count: 4), spacing: 10) {
+            ForEach(tiles, id: \.self) { token in
+                AppTile(token: token, selected: selection.contains(token)) {
+                    if selection.contains(token) {
+                        selection.remove(token)
+                    } else {
+                        selection.insert(token)
+                    }
+                }
+            }
+            OtherAppTile {
+                choosingApps = true
+            }
+        }
+    }
+
     private var progressGrid: some View {
         LazyVGrid(
             columns: Array(repeating: GridItem(.fixed(24), spacing: 9), count: 10),
@@ -252,24 +306,16 @@ struct UnlockView: View {
                 PrimaryButton(title: "Done") {
                     close()
                 }
-            } else if needsChoice {
-                PrimaryButton(title: "Choose the app") {
-                    choosingApps = true
-                }
             } else {
-                PrimaryButton(title: scanButtonTitle, enabled: session.canScan) {
+                PrimaryButton(title: scanButtonTitle, enabled: session.canScan && !needsChoice) {
                     session.scanOnce()
-                }
-                if isAppsTarget && presetApps.isEmpty && session.completed == 0 && session.phase != .scanning {
-                    TextLink(title: "Pick a different app") {
-                        choosingApps = true
-                    }
                 }
             }
         }
     }
 
     private var scanButtonTitle: String {
+        if needsChoice { return "Pick an app first" }
         switch session.phase {
         case .scanning: return "Scanning…"
         case .failed: return session.completed == 0 && session.restartOnFail ? "Start over" : "Try scan \(session.nextScan) again"
